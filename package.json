@@ -1,0 +1,59 @@
+{
+  "name": "bearbricks-backend",
+  "version": "1.0.0",
+  "description": "BE@RBRICK Crowd-Sourced Pricing Engine",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "postinstall": "prisma generate",
+    "migrate": "npx prisma migrate dev",
+    "migrate:deploy": "npx prisma migrate deploy",
+    "db:seed": "node prisma/seed.js",
+    "worker:enrich": "node src/scripts/enrich-votes.js",
+    "worker:aggregate": "node src/scripts/aggregate-prices.js",
+    "worker:snapshot": "node src/scripts/snapshot.js",
+    "worker:trust": "node src/scripts/trust-evaluation-worker.js",
+    "worker:recheck": "node src/scripts/recheck-worker.js",
+    "worker:dex-linker": "node src/scripts/dex-vote-linker.js",
+    "cleanup:idempotency": "node src/scripts/cleanup-idempotency-keys.js",
+    "worker:loop": "node scripts/worker-loop.js",
+    "inspect": "node scripts/inspect-db.js",
+    "reset:cursors": "node scripts/reset-cursors.js",
+    "reset:credits": "node scripts/reset-credits.js",
+    "test:flow": "node scripts/test-full-flow.js",
+    "test:logic": "node scripts/test-all-logic.js",
+    "validate:replay": "node scripts/validate-replay.js",
+    "demo:full": "node scripts/demo-full-validation.js",
+    "test:full": "node scripts/demo-full-validation.js",
+    "verify:handover": "node scripts/verify-handover-flow.js",
+    "move:price": "node scripts/move-price.js",
+    "test:requirements": "node scripts/test-full-requirements.js",
+    "test": "jest",
+    "test:unit": "jest --testPathPattern=unit",
+    "test:api": "jest --testPathPattern=api",
+    "swagger-autogen": "node src/config/swagger-autogen.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.6.0",
+    "@prisma/client": "^7.6.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.20.0",
+    "swagger-autogen": "^2.23.7",
+    "swagger-ui-express": "^5.0.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "prisma": "^7.6.0",
+    "supertest": "^6.3.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

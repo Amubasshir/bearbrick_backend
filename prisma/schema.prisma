@@ -1,0 +1,475 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                BigInt    @id @default(autoincrement())
+  name              String
+  email             String    @unique
+  password          String
+  email_verified_at DateTime?
+  isAdmin           Boolean   @default(false) @map("is_admin")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  voteIntents      VoteIntent[]
+  voteEvents       VoteEvent[]
+  xpEvents         XpEvent[]
+  userBrickCredits UserBrickVoteCredit[]
+  identityState    UserIdentityState?
+  trustState       UserTrustState?
+  trustScoreEvents TrustScoreEvent[]
+  brickProgress    UserBrickProgress[]
+  contextSessions  ContextSession[]
+  valueDrivers     BrickValueDriver[]
+}
+
+enum VoteType {
+  UNDER
+  FAIR
+  OVER
+}
+
+enum IntentStatus {
+  PENDING
+  PROCESSED
+  REJECTED
+}
+
+enum XpReason {
+  VOTE
+  STREAK
+  RECHECK
+  ACCURACY
+  DEX_STAGE1
+  DEX_STAGE3
+  DEX_STREAK
+}
+
+enum TrustTier {
+  UNTRUSTED
+  PROBATION
+  NEUTRAL
+  RELIABLE
+  PROVEN
+}
+
+enum CycleOutcome {
+  UP
+  DOWN
+  FLAT
+}
+
+enum TrustWorkerJobStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+model VoteIntent {
+  id           BigInt       @id @default(autoincrement())
+  userId       BigInt
+  brickId      String       @map("brick_id")
+  voteType     VoteType     @map("vote_type")
+  status       IntentStatus @default(PENDING) @map("status")
+  ipHash       String?      @map("ip_hash")
+  userAgent    String?      @map("user_agent")
+  sessionId    String?      @map("session_id")
+  processedAt  DateTime?    @map("processed_at")
+  rejectReason String?      @map("reject_reason")
+  voteEventId  BigInt?      @unique @map("vote_event_id")
+  createdAt    DateTime     @default(now()) @updatedAt
+
+  user         User       @relation(fields: [userId], references: [id])
+  voteEvent    VoteEvent? @relation("IntentToEvent", fields: [voteEventId], references: [id])
+  createdEvent VoteEvent? @relation("EventToIntent")
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("vote_intents")
+}
+
+model VoteEvent {
+  id               BigInt   @id @default(autoincrement())
+  userId           BigInt   @map("user_id")
+  brickId          String   @map("brick_id")
+  voteType         VoteType @map("vote_type")
+  livePriceAtVote  Decimal  @map("live_price_at_vote") @db.Decimal(12, 2)
+  fairRangeLower   Decimal  @map("fair_range_lower") @db.Decimal(12, 2)
+  fairRangeUpper   Decimal  @map("fair_range_upper") @db.Decimal(12, 2)
+  baseStepAtVote   Int      @map("base_step_at_vote")
+  userWeightAtVote Float    @map("user_weight_at_vote")
+  cycleId          String   @map("cycle_id")
+  ipHash           String?  @map("ip_hash")
+  userAgent        String?  @map("user_agent")
+  sessionId        String?  @map("session_id")
+  voteIntentId     BigInt?  @unique @map("vote_intent_id")
+  createdAt        DateTime @default(now()) @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id])
+  voteIntent      VoteIntent?      @relation("EventToIntent", fields: [voteIntentId], references: [id])
+  createdByIntent VoteIntent?      @relation("IntentToEvent")
+  xpEvents        XpEvent[]
+  trustScoreEvent TrustScoreEvent?
+
+  @@index([brickId, createdAt])
+  @@index([brickId, cycleId])
+  @@index([userId, brickId, createdAt])
+  @@map("vote_events")
+}
+
+model XpEvent {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  voteEventId BigInt?  @map("vote_event_id")
+  brickId     String   @map("brick_id")
+  xpAmount    Int      @map("xp_amount")
+  reason      XpReason
+  createdAt   DateTime @default(now()) @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id])
+  voteEvent VoteEvent? @relation(fields: [voteEventId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("xp_events")
+}
+
+model BrickPriceState {
+  brickId                 String    @id @map("brick_id")
+  baselinePrice           Decimal?  @map("baseline_price") @db.Decimal(12, 2)
+  livePrice               Decimal   @map("live_price") @db.Decimal(12, 2)
+  currentCycleId          String    @map("current_cycle_id")
+  weightedUnder           Float     @default(0) @map("weighted_under")
+  weightedFair            Float     @default(0) @map("weighted_fair")
+  weightedOver            Float     @default(0) @map("weighted_over")
+  weightedTotal           Float     @default(0) @map("weighted_total")
+  weightedSinceLastMove   Float     @default(0) @map("weighted_since_last_move")
+  pUnder                  Float     @default(0) @map("p_under")
+  pFair                   Float     @default(0) @map("p_fair")
+  pOver                   Float     @default(0) @map("p_over")
+  pricingConfidenceC      Float     @default(0) @map("pricing_confidence_c")
+  reliabilityScoreR       Float?    @map("reliability_score_r")
+  momentumScore           Int       @default(0) @map("momentum_score")
+  lastPriceUpdate         DateTime  @default(now()) @map("last_price_update")
+  lastHighConfidencePrice Decimal?  @map("last_high_confidence_price") @db.Decimal(12, 2)
+  lastHighConfidenceVotes Float?    @map("last_high_confidence_votes")
+  lastConfidenceTimestamp DateTime? @map("last_confidence_timestamp")
+  needsRecheck            Boolean   @default(false) @map("needs_recheck")
+  freezeMode              Boolean   @default(false) @map("freeze_mode")
+  freezeUntil             DateTime? @map("freeze_until")
+  cycleStartedAt          DateTime  @default(now()) @map("cycle_started_at")
+  cycleStartPrice         Decimal   @map("cycle_start_price") @db.Decimal(12, 2)
+  recheckState            String    @default("NONE") @map("recheck_state")
+  recheckReason           String?   @map("recheck_reason")
+  recheckStartedAt        DateTime? @map("recheck_started_at")
+  recheckExpiresAt        DateTime? @map("recheck_expires_at")
+  createdAt               DateTime  @default(now()) @updatedAt
+
+  cycleCloseEvents   PricingCycleCloseEvent[]
+  freezeWindowEvents BrickFreezeWindowEvent[]
+
+  @@map("brick_price_state")
+}
+
+model BrickPriceHistory {
+  id           BigInt   @id @default(autoincrement())
+  brickId      String   @map("brick_id")
+  date         DateTime @db.Date
+  closePrice   Decimal  @map("close_price") @db.Decimal(12, 2)
+  votesThatDay Int      @default(0) @map("votes_that_day")
+  createdAt    DateTime @default(now()) @updatedAt
+
+  @@unique([brickId, date])
+  @@index([brickId, date])
+  @@map("brick_price_history")
+}
+
+model UserBrickVoteCredit {
+  userId                      BigInt    @map("user_id")
+  brickId                     String    @map("brick_id")
+  creditsRemaining            Int       @default(3) @map("credits_remaining")
+  lastVotePrice               Decimal?  @map("last_vote_price") @db.Decimal(12, 2)
+  lastVoteCycleId             String?   @map("last_vote_cycle_id")
+  lastVoteAt                  DateTime? @map("last_vote_at")
+  lastCreditRegainPrice       Decimal?  @map("last_credit_regain_price") @db.Decimal(12, 2)
+  lastCreditRegainAt          DateTime? @map("last_credit_regain_at")
+  lastRecheckCreditGrantCycle String?   @map("last_recheck_credit_grant_cycle")
+  lastRecheckCreditGrantAt    DateTime? @map("last_recheck_credit_grant_at")
+  createdAt                   DateTime  @default(now()) @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([userId, brickId])
+  @@index([brickId])
+  @@map("user_brick_vote_credits")
+}
+
+model UserIdentityState {
+  userId           BigInt    @id @map("user_id")
+  emailVerified    Boolean   @default(false) @map("email_verified")
+  trustTier        Int       @default(0) @map("trust_tier")
+  behaviorState    String    @default("NORMAL") @map("behavior_state")
+  streakDays       Int       @default(0) @map("streak_days")
+  lastActivityDate DateTime? @map("last_activity_date") @db.Date
+  createdAt        DateTime  @default(now()) @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_identity_state")
+}
+
+model WorkerCursor {
+  workerName      String   @id @map("worker_name")
+  lastProcessedId BigInt   @default(0) @map("last_processed_id")
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  @@map("worker_cursors")
+}
+
+model PricingCycleCloseEvent {
+  id                   BigInt       @id @default(autoincrement())
+  brickId              String       @map("brick_id")
+  cycleId              String       @map("cycle_id")
+  closedAt             DateTime     @map("closed_at")
+  cycleStartPrice      Decimal      @map("cycle_start_price") @db.Decimal(12, 2)
+  cycleEndPrice        Decimal      @map("cycle_end_price") @db.Decimal(12, 2)
+  outcome              CycleOutcome
+  uniqueVoters         Int          @map("unique_voters")
+  weightedTotalAtClose Float        @map("weighted_total_at_close")
+  createdAt            DateTime     @default(now()) @map("created_at")
+
+  brickPriceState  BrickPriceState   @relation(fields: [brickId], references: [brickId])
+  trustWorkerJobs  TrustWorkerJob[]
+  trustScoreEvents TrustScoreEvent[]
+
+  @@unique([brickId, cycleId])
+  @@index([cycleId])
+  @@index([closedAt])
+  @@map("pricing_cycle_close_events")
+}
+
+model BrickFreezeWindowEvent {
+  id                 BigInt    @id @default(autoincrement())
+  brickId            String    @map("brick_id")
+  cycleId            String    @map("cycle_id")
+  freezeEnteredAt    DateTime  @map("freeze_entered_at")
+  freezeExitedAt     DateTime? @map("freeze_exited_at")
+  entryWeightedTotal Float     @map("entry_weighted_total")
+  exitReason         String?   @map("exit_reason")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  brickPriceState BrickPriceState @relation(fields: [brickId], references: [brickId])
+
+  @@index([brickId, freezeEnteredAt, freezeExitedAt])
+  @@map("brick_freeze_window_events")
+}
+
+model UserTrustState {
+  userId           BigInt    @id @map("user_id")
+  trustScore       Float     @default(0.0) @map("trust_score")
+  trustTier        TrustTier @default(UNTRUSTED) @map("trust_tier")
+  totalScoredVotes Int       @default(0) @map("total_scored_votes")
+  alignedVotes     Int       @default(0) @map("aligned_votes")
+  misalignedVotes  Int       @default(0) @map("misaligned_votes")
+  abuseFlagCount   Int       @default(0) @map("abuse_flag_count")
+  cooldownUntil    DateTime? @map("cooldown_until")
+  lastScoredAt     DateTime? @map("last_scored_at")
+  lastUpdatedAt    DateTime  @default(now()) @updatedAt @map("last_updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([trustTier])
+  @@index([cooldownUntil])
+  @@map("user_trust_state")
+}
+
+model TrustScoreEvent {
+  id                BigInt   @id @default(autoincrement())
+  userId            BigInt   @map("user_id")
+  brickId           String   @map("brick_id")
+  cycleId           String   @map("cycle_id")
+  cycleCloseEventId BigInt   @map("cycle_close_event_id")
+  voteEventId       BigInt   @unique @map("vote_event_id")
+  voteType          VoteType @map("vote_type")
+  aligned           Boolean  @map("aligned")
+  userWeightAtVote  Float    @map("user_weight_at_vote")
+  voteCreatedAt     DateTime @map("vote_created_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user            User                   @relation(fields: [userId], references: [id])
+  cycleCloseEvent PricingCycleCloseEvent @relation(fields: [cycleCloseEventId], references: [id])
+  voteEvent       VoteEvent?             @relation(fields: [voteEventId], references: [id])
+
+  @@unique([userId, brickId, cycleId])
+  @@index([userId, createdAt])
+  @@index([cycleId])
+  @@map("trust_score_events")
+}
+
+model TrustWorkerJob {
+  id                BigInt               @id @default(autoincrement())
+  cycleCloseEventId BigInt               @unique @map("cycle_close_event_id")
+  status            TrustWorkerJobStatus @default(PENDING)
+  claimedBy         String?              @map("claimed_by")
+  claimedAt         DateTime?            @map("claimed_at")
+  startedAt         DateTime?            @map("started_at")
+  finishedAt        DateTime?            @map("finished_at")
+  errorMessage      String?              @map("error_message")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  cycleCloseEvent PricingCycleCloseEvent @relation(fields: [cycleCloseEventId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("trust_worker_jobs")
+}
+
+// ── Dex Phase 1 ────────────────────────────────────────────────────────────────
+
+enum BrickStatus {
+  UNRELEASED
+  PROTOTYPE
+  PUBLISHED
+}
+
+model BrickFamily {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  coverImageUrl String?  @map("cover_image_url")
+  displayOrder  Int      @default(0) @map("display_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  bricks Brick[]
+
+  @@map("brick_families")
+}
+
+model Brick {
+  id               String      @id @default(uuid())
+  name             String
+  descriptionShort String      @map("description_short")
+  descriptionLong  String?     @map("description_long")
+  series           String?
+  colorway         String?
+  imageUrl         String?     @map("image_url")
+  thumbnailUrl     String?     @map("thumbnail_url")
+  editionSize      Int?        @map("edition_size")
+  retailPrice      Decimal?    @map("retail_price") @db.Decimal(12, 2)
+  featured         Boolean     @default(false)
+  tags             String[]    @default([])
+  status           BrickStatus @default(UNRELEASED)
+  releasedAt       DateTime?   @map("released_at")
+  familyId         String?     @map("family_id")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  family          BrickFamily?        @relation(fields: [familyId], references: [id])
+  userProgress    UserBrickProgress[]
+  contextSessions ContextSession[]
+  valueDrivers    BrickValueDriver[]
+
+  @@map("bricks")
+}
+
+model UserBrickProgress {
+  userId      BigInt    @map("user_id")
+  brickId     String    @map("brick_id")
+  stage       Int       @default(0)
+  stage1At    DateTime? @map("stage1_at")
+  stage2At    DateTime? @map("stage2_at")
+  stage3At    DateTime? @map("stage3_at")
+  voteType    String?   @map("vote_type")
+  voteEventId BigInt?   @map("vote_event_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  brick Brick @relation(fields: [brickId], references: [id])
+
+  @@id([userId, brickId])
+  @@index([userId, stage])
+  @@index([brickId, stage])
+  @@map("user_brick_progress")
+}
+
+model ContextSession {
+  id              BigInt   @id @default(autoincrement())
+  userId          BigInt   @map("user_id")
+  brickId         String   @map("brick_id")
+  dwellSeconds    Int      @default(0) @map("dwell_seconds")
+  scrollPct       Int      @default(0) @map("scroll_pct")
+  interactionSeen Boolean  @default(false) @map("interaction_seen")
+  completed       Boolean  @default(false)
+  idempotencyKey  String?  @unique @map("idempotency_key")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  brick Brick @relation(fields: [brickId], references: [id])
+
+  @@index([userId, brickId])
+  @@map("context_sessions")
+}
+
+model BrickValueDriver {
+  userId         BigInt   @map("user_id")
+  brickId        String   @map("brick_id")
+  axis           String
+  optionKey      String   @map("option_key")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  submittedAt    DateTime @default(now()) @map("submitted_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  brick Brick @relation(fields: [brickId], references: [id])
+
+  @@id([userId, brickId])
+  @@map("brick_value_drivers")
+}
+
+model IdempotencyKey {
+  key          String   @id
+  userId       BigInt   @map("user_id")
+  endpoint     String
+  responseCode Int      @map("response_code")
+  responseBody Json     @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+// ── Dex Phase 2 ────────────────────────────────────────────────────────────────
+
+model BrickValueDriverOption {
+  id           Int    @id @default(autoincrement())
+  axis         String
+  optionKey    String @map("option_key")
+  label        String
+  displayOrder Int    @default(0) @map("display_order")
+
+  @@unique([axis, optionKey])
+  @@map("brick_value_driver_options")
+}
+
+model DexEventLog {
+  id        BigInt   @id @default(autoincrement())
+  eventType String   @map("event_type")
+  userId    BigInt   @map("user_id")
+  brickId   String   @map("brick_id")
+  fromStage Int?     @map("from_stage")
+  toStage   Int?     @map("to_stage")
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([brickId, createdAt])
+  @@index([userId, createdAt])
+  @@map("dex_event_log")
+}
