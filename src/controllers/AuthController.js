@@ -1,5 +1,6 @@
 const AuthService = require("../services/AuthService");
 const prisma = require("../lib/prisma");
+const { computeLocalDayKey, resolveSessionWindow, toDayKeyString } = require("../lib/sessions");
 
 async function login(req, res) {
   const { email, password } = req.body;
@@ -34,7 +35,7 @@ async function logout(req, res) {
 }
 
 async function signup(req, res) {
-  const { name, email, password, email_verified } = req.body;
+  const { name, email, password, email_verified, timezone, guest_session } = req.body;
   const errors = {};
 
   if (!name || !name.trim()) errors.name = ["Required"];
@@ -73,11 +74,95 @@ async function signup(req, res) {
     return res.status(409).json({ success: false, message: result.message });
   }
 
+  const userId = BigInt(result.data.user.id);
+
+  // Persist timezone if provided. Default 'UTC' is set by the DB column default.
+  if (timezone && typeof timezone === "string") {
+    await prisma.$queryRawUnsafe(
+      `UPDATE "User" SET timezone = $2 WHERE id = $1`,
+      userId,
+      timezone
+    );
+  }
+
+  // Guest session conversion — silent on failure, never block signup.
+  if (guest_session && typeof guest_session === "object") {
+    try {
+      await convertGuestSession(userId, guest_session, timezone || "UTC");
+    } catch (err) {
+      console.error("[signup.guest_session] conversion failed:", err.message);
+    }
+  }
+
   return res.status(201).json({
     success: true,
     message: "Signup successful",
     data: result.data,
   });
+}
+
+const SESSION_TARGETS = { MORNING: 7, EVENING: 11 };
+
+async function convertGuestSession(userId, guest, userTz) {
+  const { session_set_id, kind, local_day_key, brick_ids } = guest;
+  if (!session_set_id || !kind || !local_day_key || !Array.isArray(brick_ids)) return;
+  if (!SESSION_TARGETS[kind]) return;
+
+  const setRows = await prisma.$queryRawUnsafe(
+    `SELECT id, local_day_key, kind FROM daily_session_sets WHERE id = $1::uuid`,
+    session_set_id
+  );
+  if (setRows.length === 0) return;
+  const set = setRows[0];
+  const setDayIso = toDayKeyString(set.local_day_key);
+  if (set.kind !== kind) return;
+  if (setDayIso !== local_day_key) return;
+
+  // Window must still be active — drop carry if expired.
+  const now = new Date();
+  const currentDayIso = toDayKeyString(computeLocalDayKey(now, userTz));
+  const currentWindow = resolveSessionWindow(now, userTz);
+  if (currentDayIso !== setDayIso) return;
+  if (currentWindow !== kind) return;
+
+  // Bootstrap progress row, then insert counted rows (no double count) and
+  // recompute partial_count from the row count.
+  const target = SESSION_TARGETS[kind];
+  await prisma.$queryRawUnsafe(
+    `INSERT INTO user_session_progress
+       (user_id, session_set_id, partial_count, target_count, created_at, updated_at)
+     VALUES ($1, $2::uuid, 0, $3, NOW(), NOW())
+     ON CONFLICT (user_id, session_set_id) DO NOTHING`,
+    userId, session_set_id, target
+  );
+
+  for (const brickId of brick_ids) {
+    const member = await prisma.$queryRawUnsafe(
+      `SELECT 1 AS hit FROM daily_session_set_items
+        WHERE session_set_id = $1::uuid AND brick_id = $2`,
+      session_set_id, brickId
+    );
+    if (member.length === 0) continue;
+    await prisma.$queryRawUnsafe(
+      `INSERT INTO user_session_brick_counts
+         (user_id, session_set_id, brick_id)
+       VALUES ($1, $2::uuid, $3)
+       ON CONFLICT (user_id, session_set_id, brick_id) DO NOTHING`,
+      userId, session_set_id, brickId
+    );
+  }
+
+  // Recompute partial_count from authoritative row count
+  await prisma.$queryRawUnsafe(
+    `UPDATE user_session_progress
+        SET partial_count = (
+          SELECT COUNT(*) FROM user_session_brick_counts
+           WHERE user_id = $1 AND session_set_id = $2::uuid
+        ),
+        updated_at = NOW()
+      WHERE user_id = $1 AND session_set_id = $2::uuid`,
+    userId, session_set_id
+  );
 }
 
 async function me(req, res) {

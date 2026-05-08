@@ -195,7 +195,7 @@ The client is migrating a large Google Sheet of BE@RBRICK data into Supabase. Th
 
 ## Milestone 3 — XP and Gamification Engine
 
-**Status:** NOT YET STARTED. Broken into 4 phases. .
+**Status:** STARTED. Broken into 4 phases. First phase which is M3a done.
 
 The full XP spec (64 pages, canonical developer specification) has been reviewed and all 14 clarifying questions have been answered by the client. The system is fully specced and ready to build. The contribution, moderation, and bounty subsystem is explicitly out of scope for this milestone and will be a separate phase later.
 
@@ -203,7 +203,7 @@ The full XP spec (64 pages, canonical developer specification) has been reviewed
 
 ### M3a — Core XP Foundation
 
-**Status:** Not started.
+**Status:** Complete
 
 **Scope:**
 

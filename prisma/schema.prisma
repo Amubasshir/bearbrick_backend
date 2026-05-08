@@ -13,6 +13,7 @@ model User {
   password          String
   email_verified_at DateTime?
   isAdmin           Boolean   @default(false) @map("is_admin")
+  timezone          String    @default("UTC")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -584,4 +585,153 @@ model XpConfigVersion {
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@map("xp_config_versions")
+}
+
+// ── M3b — Sessions and Streaks ─────────────────────────────────────────────────
+
+enum SessionKind {
+  MORNING
+  EVENING
+}
+
+model SessionRotationCycle {
+  id        String    @id @default(uuid()) @db.Uuid
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  poolSize  Int       @default(0) @map("pool_size")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  sessionSets DailySessionSet[]
+  setItems    DailySessionSetItem[]
+
+  @@map("session_rotation_cycles")
+}
+
+model DailySessionSet {
+  id              String      @id @default(uuid()) @db.Uuid
+  localDayKey     DateTime    @db.Date @map("local_day_key")
+  kind            SessionKind
+  rotationCycleId String      @db.Uuid @map("rotation_cycle_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  rotationCycle SessionRotationCycle    @relation(fields: [rotationCycleId], references: [id])
+  items         DailySessionSetItem[]
+
+  @@unique([localDayKey, kind])
+  @@index([rotationCycleId])
+  @@map("daily_session_sets")
+}
+
+model DailySessionSetItem {
+  sessionSetId    String   @db.Uuid @map("session_set_id")
+  brickId         String   @map("brick_id")
+  slotIndex       Int      @map("slot_index")
+  rotationCycleId String   @db.Uuid @map("rotation_cycle_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  sessionSet    DailySessionSet      @relation(fields: [sessionSetId], references: [id], onDelete: Cascade)
+  rotationCycle SessionRotationCycle @relation(fields: [rotationCycleId], references: [id])
+
+  @@id([sessionSetId, brickId])
+  @@unique([rotationCycleId, brickId])
+  @@index([sessionSetId, slotIndex])
+  @@index([brickId])
+  @@map("daily_session_set_items")
+}
+
+model UserSessionProgress {
+  userId        BigInt    @map("user_id")
+  sessionSetId  String    @db.Uuid @map("session_set_id")
+  partialCount  Int       @default(0) @map("partial_count")
+  targetCount   Int       @map("target_count")
+  completedAt   DateTime? @map("completed_at")
+  expiredAt     DateTime? @map("expired_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@id([userId, sessionSetId])
+  @@index([sessionSetId])
+  @@map("user_session_progress")
+}
+
+model UserSessionBrickCount {
+  id            BigInt   @id @default(autoincrement())
+  userId        BigInt   @map("user_id")
+  sessionSetId  String   @db.Uuid @map("session_set_id")
+  brickId       String   @map("brick_id")
+  voteEventId   BigInt?  @map("vote_event_id")
+  countedAt     DateTime @default(now()) @map("counted_at")
+
+  @@unique([userId, sessionSetId, brickId])
+  @@index([userId, sessionSetId])
+  @@map("user_session_brick_counts")
+}
+
+model UserStreakState {
+  userId                       BigInt    @id @map("user_id")
+  morningStreak                Int       @default(0) @map("morning_streak")
+  morningLastCompletedLocalDay DateTime? @db.Date @map("morning_last_completed_local_day")
+  morningLongest               Int       @default(0) @map("morning_longest")
+  eveningStreak                Int       @default(0) @map("evening_streak")
+  eveningLastCompletedLocalDay DateTime? @db.Date @map("evening_last_completed_local_day")
+  eveningLongest               Int       @default(0) @map("evening_longest")
+  updatedAt                    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("user_streak_state")
+}
+
+model ActiveVote {
+  userId             BigInt   @map("user_id")
+  brickId            String   @map("brick_id")
+  currentVoteType    VoteType @map("current_vote_type")
+  currentVoteEventId BigInt   @map("current_vote_event_id")
+  voteCountForBrick  Int      @default(1) @map("vote_count_for_brick")
+  firstVotedAt       DateTime @map("first_voted_at")
+  lastVotedAt        DateTime @map("last_voted_at")
+
+  @@id([userId, brickId])
+  @@index([brickId])
+  @@map("active_votes")
+}
+
+model SessionCompletionEvent {
+  id                       BigInt      @id @default(autoincrement())
+  userId                   BigInt      @map("user_id")
+  sessionSetId             String      @db.Uuid @map("session_set_id")
+  kind                     SessionKind
+  localDayKey              DateTime    @db.Date @map("local_day_key")
+  streakAfterCompletion    Int         @map("streak_after_completion")
+  triggeredByVoteEventId   BigInt      @map("triggered_by_vote_event_id")
+  createdAt                DateTime    @default(now()) @map("created_at")
+
+  @@unique([userId, sessionSetId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([localDayKey, kind])
+  @@map("session_completion_events")
+}
+
+model SessionWindowExpiryEvent {
+  id                    BigInt      @id @default(autoincrement())
+  userId                BigInt      @map("user_id")
+  sessionSetId          String      @db.Uuid @map("session_set_id")
+  kind                  SessionKind
+  localDayKey           DateTime    @db.Date @map("local_day_key")
+  partialCountAtExpiry  Int         @map("partial_count_at_expiry")
+  createdAt             DateTime    @default(now()) @map("created_at")
+
+  @@unique([userId, sessionSetId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("session_window_expiry_events")
+}
+
+model StreakBreakEvent {
+  id           BigInt      @id @default(autoincrement())
+  userId       BigInt      @map("user_id")
+  kind         SessionKind
+  fromStreak   Int         @map("from_streak")
+  localDayKey  DateTime    @db.Date @map("local_day_key")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("streak_break_events")
 }

@@ -7,6 +7,7 @@ const adminRoutes = require('./routes/admin');
 const dexProfileRoutes = require('./routes/dex-profile');
 const dexFamiliesRoutes = require('./routes/dex-families');
 const adminDashboardRoutes = require('./routes/admin-dashboard');
+const sessionsRoutes = require('./routes/sessions');
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use("/api", adminRoutes);
 app.use("/api", dexProfileRoutes);
 app.use("/api", dexFamiliesRoutes);
 app.use("/api", adminDashboardRoutes);
+app.use("/api", sessionsRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
