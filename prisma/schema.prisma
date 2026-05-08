@@ -16,16 +16,21 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  voteIntents      VoteIntent[]
-  voteEvents       VoteEvent[]
-  xpEvents         XpEvent[]
-  userBrickCredits UserBrickVoteCredit[]
-  identityState    UserIdentityState?
-  trustState       UserTrustState?
-  trustScoreEvents TrustScoreEvent[]
-  brickProgress    UserBrickProgress[]
-  contextSessions  ContextSession[]
-  valueDrivers     BrickValueDriver[]
+  voteIntents        VoteIntent[]
+  voteEvents         VoteEvent[]
+  xpEvents           XpEvent[]
+  userBrickCredits   UserBrickVoteCredit[]
+  identityState      UserIdentityState?
+  trustState         UserTrustState?
+  trustScoreEvents   TrustScoreEvent[]
+  brickProgress      UserBrickProgress[]
+  contextSessions    ContextSession[]
+  valueDrivers       BrickValueDriver[]
+  progressState      UserProgressState?
+  levelUpEvents      LevelUpEvent[]
+  xpIdempotencyKeys  XpIdempotencyKey[]
+  xpAdjustmentEvents XpAdjustmentEvent[]
+  dailyXpCounters    UserDailyXpCounter[]
 }
 
 enum VoteType {
@@ -124,16 +129,26 @@ model VoteEvent {
 }
 
 model XpEvent {
-  id          BigInt   @id @default(autoincrement())
-  userId      BigInt   @map("user_id")
-  voteEventId BigInt?  @map("vote_event_id")
-  brickId     String   @map("brick_id")
-  xpAmount    Int      @map("xp_amount")
-  reason      XpReason
-  createdAt   DateTime @default(now()) @updatedAt
+  id             BigInt    @id @default(autoincrement())
+  userId         BigInt    @map("user_id")
+  voteEventId    BigInt?   @map("vote_event_id")
+  brickId        String?   @map("brick_id")
+  xpAmount       Int       @map("xp_amount")
+  xpDeltaSigned  Int       @default(0) @map("xp_delta_signed")
+  reason         XpReason
+  eventType      String    @default("legacy") @map("event_type")
+  sourceSystem   String    @default("phase2") @map("source_system")
+  xpConfirmed    Boolean   @default(true) @map("xp_confirmed")
+  localDayKey    DateTime  @db.Date @default(dbgenerated("CURRENT_DATE")) @map("local_day_key")
+  idempotencyKey String?   @map("idempotency_key")
+  metadata       Json?
+  createdAt      DateTime  @default(now()) @updatedAt
 
-  user      User       @relation(fields: [userId], references: [id])
-  voteEvent VoteEvent? @relation(fields: [voteEventId], references: [id])
+  user              User                @relation(fields: [userId], references: [id])
+  voteEvent         VoteEvent?          @relation(fields: [voteEventId], references: [id])
+  levelUpEvents     LevelUpEvent[]
+  xpIdempotencyKeys XpIdempotencyKey[]
+  xpAdjustments     XpAdjustmentEvent[] @relation("OriginalEvent")
 
   @@index([userId, createdAt])
   @@map("xp_events")
@@ -472,4 +487,101 @@ model DexEventLog {
   @@index([brickId, createdAt])
   @@index([userId, createdAt])
   @@map("dex_event_log")
+}
+
+// ── M3a — Core XP Foundation ───────────────────────────────────────────────────
+
+model LevelDefinition {
+  id          BigInt   @id @default(autoincrement())
+  levelNumber Int      @unique @map("level_number")
+  minXp       Int      @map("min_xp")
+  label       String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("level_definitions")
+}
+
+model XpAdjustmentEvent {
+  id                 BigInt   @id @default(autoincrement())
+  userId             BigInt   @map("user_id")
+  originalXpEventId  BigInt?  @map("original_xp_event_id")
+  xpDeltaSigned      Int      @map("xp_delta_signed")
+  reason             String
+  createdBy          String   @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  metadata           Json?
+
+  user          User     @relation(fields: [userId], references: [id])
+  originalEvent XpEvent? @relation("OriginalEvent", fields: [originalXpEventId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("xp_adjustment_events")
+}
+
+model UserProgressState {
+  userId                   BigInt   @id @map("user_id")
+  totalXpConfirmed         Int      @default(0) @map("total_xp_confirmed")
+  currentLevel             Int      @default(1) @map("current_level")
+  highestLevelEver         Int      @default(1) @map("highest_level_ever")
+  lastReconciledXpEventId  BigInt   @default(0) @map("last_reconciled_xp_event_id")
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_progress_state")
+}
+
+model LevelUpEvent {
+  id                     BigInt   @id @default(autoincrement())
+  userId                 BigInt   @map("user_id")
+  fromLevel              Int      @map("from_level")
+  toLevel                Int      @map("to_level")
+  triggeredByXpEventId   BigInt?  @map("triggered_by_xp_event_id")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  user         User     @relation(fields: [userId], references: [id])
+  triggerEvent XpEvent? @relation(fields: [triggeredByXpEventId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("level_up_events")
+}
+
+model XpIdempotencyKey {
+  key        String   @id
+  userId     BigInt   @map("user_id")
+  xpEventId  BigInt?  @map("xp_event_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id])
+  xpEvent  XpEvent? @relation(fields: [xpEventId], references: [id])
+
+  @@index([userId])
+  @@map("xp_idempotency_keys")
+}
+
+model UserDailyXpCounter {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @map("user_id")
+  localDayKey  DateTime @db.Date @map("local_day_key")
+  xpType       String   @map("xp_type")
+  xpTotal      Int      @default(0) @map("xp_total")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, localDayKey, xpType])
+  @@index([userId, localDayKey])
+  @@map("user_daily_xp_counters")
+}
+
+model XpConfigVersion {
+  id          BigInt    @id @default(autoincrement())
+  version     Int       @unique
+  config      Json
+  isActive    Boolean   @default(false) @map("is_active")
+  activatedAt DateTime? @map("activated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("xp_config_versions")
 }
