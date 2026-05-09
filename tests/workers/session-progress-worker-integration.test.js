@@ -55,12 +55,17 @@ async function setUserTimezone(userId, tz) {
 
 async function createPublishedBrick({ name = 'Test Brick' } = {}) {
   const id = uuidv4();
+  // Status PROTOTYPE: this brick is wired into a session set via raw SQL,
+  // which doesn't gate on status. Keeping it out of the PUBLISHED pool
+  // avoids polluting global counts (e.g. /dex/bricks/featured pagination,
+  // DexStatsService.completion_pct denominators) that other test suites
+  // assert against.
   await prisma.brick.create({
     data: {
       id,
       name,
       descriptionShort: 'Test brick for sessions worker',
-      status: 'PUBLISHED',
+      status: 'PROTOTYPE',
       releasedAt: new Date(),
     },
   });

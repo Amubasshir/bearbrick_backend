@@ -127,15 +127,15 @@ async function search(req, res) {
   const rows = await prisma.$queryRaw`
     SELECT id
     FROM bricks
-    WHERE search_vector @@ plainto_tsquery('english', ${q})
-    ORDER BY ts_rank(search_vector, plainto_tsquery('english', ${q})) DESC
+    WHERE search_tsv @@ plainto_tsquery('english', ${q})
+    ORDER BY ts_rank(search_tsv, plainto_tsquery('english', ${q})) DESC
     LIMIT ${limit} OFFSET ${skip}
   `;
 
   const totalRows = await prisma.$queryRaw`
     SELECT COUNT(*) AS cnt
     FROM bricks
-    WHERE search_vector @@ plainto_tsquery('english', ${q})
+    WHERE search_tsv @@ plainto_tsquery('english', ${q})
   `;
   const total = Number(totalRows[0]?.cnt ?? 0);
 

@@ -13,12 +13,15 @@ afterAll(async () => {
 
 async function createPublishedBrick() {
   const id = uuidv4();
+  // Status PROTOTYPE — this fixture is wired into a 2025-dated (expired)
+  // session set via raw SQL, which doesn't filter by status. PUBLISHED
+  // would pollute global brick counts other suites assert against.
   await prisma.brick.create({
     data: {
       id,
       name: 'Guest test brick',
       descriptionShort: 'Brick for guest conversion test',
-      status: 'PUBLISHED',
+      status: 'PROTOTYPE',
       releasedAt: new Date(),
     },
   });
@@ -158,25 +161,48 @@ describe('POST /api/signup — guest session conversion', () => {
       email_verified: true, timezone: tz,
     });
     const seedToken = seedRes.body.data.token;
-    const todayRes = await request(app)
-      .get('/api/sessions/today')
-      .set('Authorization', `Bearer ${seedToken}`);
-    expect(todayRes.status).toBe(200);
-    if (todayRes.body.data.current_window !== 'MORNING') return;
+    let todayRes;
+    let setId;
+    let carriedBrickIds = [];
+    // JIT build can leave today's set with 0 items if a prior run's bricks
+    // were later deleted, or it can race with parallel test files (loser
+    // sees the set row before the winner's items land). Two-step recovery:
+    //   1. Hit /sessions/today.
+    //   2. If items are empty, drop the orphaned set + retry so JIT rebuilds.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      todayRes = await request(app)
+        .get('/api/sessions/today')
+        .set('Authorization', `Bearer ${seedToken}`);
+      if (todayRes.status !== 200) break;
+      if (todayRes.body.data.current_window !== 'MORNING') return;
 
-    const setRows = await prisma.$queryRawUnsafe(
-      `SELECT id FROM daily_session_sets
-        WHERE local_day_key = $1::date AND kind = 'MORNING'`,
-      dayKey
-    );
-    const setId = setRows[0].id;
-    const items = await prisma.$queryRawUnsafe(
-      `SELECT brick_id FROM daily_session_set_items
-        WHERE session_set_id = $1::uuid
-        ORDER BY slot_index ASC LIMIT 3`,
-      setId
-    );
-    const carriedBrickIds = items.map((r) => r.brick_id);
+      const setRows = await prisma.$queryRawUnsafe(
+        `SELECT id FROM daily_session_sets
+          WHERE local_day_key = $1::date AND kind = 'MORNING'`,
+        dayKey
+      );
+      if (setRows.length === 0) {
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
+      setId = setRows[0].id;
+      const items = await prisma.$queryRawUnsafe(
+        `SELECT brick_id FROM daily_session_set_items
+          WHERE session_set_id = $1::uuid
+          ORDER BY slot_index ASC LIMIT 3`,
+        setId
+      );
+      carriedBrickIds = items.map((r) => r.brick_id);
+      if (carriedBrickIds.length > 0) break;
+      // Empty set → orphaned (e.g. items deleted by an earlier brick purge).
+      // Drop it so the next JIT call rebuilds it from the live PUBLISHED pool.
+      await prisma.$queryRawUnsafe(
+        `DELETE FROM daily_session_sets WHERE id = $1::uuid`,
+        setId
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(todayRes.status).toBe(200);
     expect(carriedBrickIds.length).toBeGreaterThanOrEqual(1);
 
     const guestSession = {
