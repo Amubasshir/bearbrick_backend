@@ -17,6 +17,12 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
+  // M3d cosmetic equip-slot FKs. Nullable; ownership validated in app code.
+  primaryCallingCardId BigInt? @map("primary_calling_card_id")
+  equippedBadgeSlot1   BigInt? @map("equipped_badge_slot_1")
+  equippedBadgeSlot2   BigInt? @map("equipped_badge_slot_2")
+  equippedBadgeSlot3   BigInt? @map("equipped_badge_slot_3")
+
   voteIntents        VoteIntent[]
   voteEvents         VoteEvent[]
   xpEvents           XpEvent[]
@@ -32,6 +38,12 @@ model User {
   xpIdempotencyKeys  XpIdempotencyKey[]
   xpAdjustmentEvents XpAdjustmentEvent[]
   dailyXpCounters    UserDailyXpCounter[]
+
+  // M3d back-relations
+  leaderboardStateRows    LeaderboardState[]
+  leaderboardRewardEvents LeaderboardRewardEvent[]
+  userRewards             UserReward[]
+  inboxEntries            InboxEntry[]
 }
 
 enum VoteType {
@@ -130,20 +142,20 @@ model VoteEvent {
 }
 
 model XpEvent {
-  id             BigInt    @id @default(autoincrement())
-  userId         BigInt    @map("user_id")
-  voteEventId    BigInt?   @map("vote_event_id")
-  brickId        String?   @map("brick_id")
-  xpAmount       Int       @map("xp_amount")
-  xpDeltaSigned  Int       @default(0) @map("xp_delta_signed")
+  id             BigInt   @id @default(autoincrement())
+  userId         BigInt   @map("user_id")
+  voteEventId    BigInt?  @map("vote_event_id")
+  brickId        String?  @map("brick_id")
+  xpAmount       Int      @map("xp_amount")
+  xpDeltaSigned  Int      @default(0) @map("xp_delta_signed")
   reason         XpReason
-  eventType      String    @default("legacy") @map("event_type")
-  sourceSystem   String    @default("phase2") @map("source_system")
-  xpConfirmed    Boolean   @default(true) @map("xp_confirmed")
-  localDayKey    DateTime  @db.Date @default(dbgenerated("CURRENT_DATE")) @map("local_day_key")
-  idempotencyKey String?   @map("idempotency_key")
+  eventType      String   @default("legacy") @map("event_type")
+  sourceSystem   String   @default("phase2") @map("source_system")
+  xpConfirmed    Boolean  @default(true) @map("xp_confirmed")
+  localDayKey    DateTime @default(dbgenerated("CURRENT_DATE")) @map("local_day_key") @db.Date
+  idempotencyKey String?  @map("idempotency_key")
   metadata       Json?
-  createdAt      DateTime  @default(now()) @updatedAt
+  createdAt      DateTime @default(now()) @updatedAt
 
   user              User                @relation(fields: [userId], references: [id])
   voteEvent         VoteEvent?          @relation(fields: [voteEventId], references: [id])
@@ -504,14 +516,14 @@ model LevelDefinition {
 }
 
 model XpAdjustmentEvent {
-  id                 BigInt   @id @default(autoincrement())
-  userId             BigInt   @map("user_id")
-  originalXpEventId  BigInt?  @map("original_xp_event_id")
-  xpDeltaSigned      Int      @map("xp_delta_signed")
-  reason             String
-  createdBy          String   @map("created_by")
-  createdAt          DateTime @default(now()) @map("created_at")
-  metadata           Json?
+  id                BigInt   @id @default(autoincrement())
+  userId            BigInt   @map("user_id")
+  originalXpEventId BigInt?  @map("original_xp_event_id")
+  xpDeltaSigned     Int      @map("xp_delta_signed")
+  reason            String
+  createdBy         String   @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  metadata          Json?
 
   user          User     @relation(fields: [userId], references: [id])
   originalEvent XpEvent? @relation("OriginalEvent", fields: [originalXpEventId], references: [id])
@@ -521,12 +533,12 @@ model XpAdjustmentEvent {
 }
 
 model UserProgressState {
-  userId                   BigInt   @id @map("user_id")
-  totalXpConfirmed         Int      @default(0) @map("total_xp_confirmed")
-  currentLevel             Int      @default(1) @map("current_level")
-  highestLevelEver         Int      @default(1) @map("highest_level_ever")
-  lastReconciledXpEventId  BigInt   @default(0) @map("last_reconciled_xp_event_id")
-  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
+  userId                  BigInt   @id @map("user_id")
+  totalXpConfirmed        Int      @default(0) @map("total_xp_confirmed")
+  currentLevel            Int      @default(1) @map("current_level")
+  highestLevelEver        Int      @default(1) @map("highest_level_ever")
+  lastReconciledXpEventId BigInt   @default(0) @map("last_reconciled_xp_event_id")
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -534,12 +546,12 @@ model UserProgressState {
 }
 
 model LevelUpEvent {
-  id                     BigInt   @id @default(autoincrement())
-  userId                 BigInt   @map("user_id")
-  fromLevel              Int      @map("from_level")
-  toLevel                Int      @map("to_level")
-  triggeredByXpEventId   BigInt?  @map("triggered_by_xp_event_id")
-  createdAt              DateTime @default(now()) @map("created_at")
+  id                   BigInt   @id @default(autoincrement())
+  userId               BigInt   @map("user_id")
+  fromLevel            Int      @map("from_level")
+  toLevel              Int      @map("to_level")
+  triggeredByXpEventId BigInt?  @map("triggered_by_xp_event_id")
+  createdAt            DateTime @default(now()) @map("created_at")
 
   user         User     @relation(fields: [userId], references: [id])
   triggerEvent XpEvent? @relation(fields: [triggeredByXpEventId], references: [id])
@@ -549,25 +561,25 @@ model LevelUpEvent {
 }
 
 model XpIdempotencyKey {
-  key        String   @id
-  userId     BigInt   @map("user_id")
-  xpEventId  BigInt?  @map("xp_event_id")
-  createdAt  DateTime @default(now()) @map("created_at")
+  key       String   @id
+  userId    BigInt   @map("user_id")
+  xpEventId BigInt?  @map("xp_event_id")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  user     User     @relation(fields: [userId], references: [id])
-  xpEvent  XpEvent? @relation(fields: [xpEventId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  xpEvent XpEvent? @relation(fields: [xpEventId], references: [id])
 
   @@index([userId])
   @@map("xp_idempotency_keys")
 }
 
 model UserDailyXpCounter {
-  id           BigInt   @id @default(autoincrement())
-  userId       BigInt   @map("user_id")
-  localDayKey  DateTime @db.Date @map("local_day_key")
-  xpType       String   @map("xp_type")
-  xpTotal      Int      @default(0) @map("xp_total")
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  localDayKey DateTime @map("local_day_key") @db.Date
+  xpType      String   @map("xp_type")
+  xpTotal     Int      @default(0) @map("xp_total")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -609,12 +621,12 @@ model SessionRotationCycle {
 
 model DailySessionSet {
   id              String      @id @default(uuid()) @db.Uuid
-  localDayKey     DateTime    @db.Date @map("local_day_key")
+  localDayKey     DateTime    @map("local_day_key") @db.Date
   kind            SessionKind
-  rotationCycleId String      @db.Uuid @map("rotation_cycle_id")
+  rotationCycleId String      @map("rotation_cycle_id") @db.Uuid
   createdAt       DateTime    @default(now()) @map("created_at")
 
-  rotationCycle SessionRotationCycle    @relation(fields: [rotationCycleId], references: [id])
+  rotationCycle SessionRotationCycle  @relation(fields: [rotationCycleId], references: [id])
   items         DailySessionSetItem[]
 
   @@unique([localDayKey, kind])
@@ -623,10 +635,10 @@ model DailySessionSet {
 }
 
 model DailySessionSetItem {
-  sessionSetId    String   @db.Uuid @map("session_set_id")
+  sessionSetId    String   @map("session_set_id") @db.Uuid
   brickId         String   @map("brick_id")
   slotIndex       Int      @map("slot_index")
-  rotationCycleId String   @db.Uuid @map("rotation_cycle_id")
+  rotationCycleId String   @map("rotation_cycle_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
 
   sessionSet    DailySessionSet      @relation(fields: [sessionSetId], references: [id], onDelete: Cascade)
@@ -640,14 +652,14 @@ model DailySessionSetItem {
 }
 
 model UserSessionProgress {
-  userId        BigInt    @map("user_id")
-  sessionSetId  String    @db.Uuid @map("session_set_id")
-  partialCount  Int       @default(0) @map("partial_count")
-  targetCount   Int       @map("target_count")
-  completedAt   DateTime? @map("completed_at")
-  expiredAt     DateTime? @map("expired_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  userId       BigInt    @map("user_id")
+  sessionSetId String    @map("session_set_id") @db.Uuid
+  partialCount Int       @default(0) @map("partial_count")
+  targetCount  Int       @map("target_count")
+  completedAt  DateTime? @map("completed_at")
+  expiredAt    DateTime? @map("expired_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
 
   @@id([userId, sessionSetId])
   @@index([sessionSetId])
@@ -655,12 +667,12 @@ model UserSessionProgress {
 }
 
 model UserSessionBrickCount {
-  id            BigInt   @id @default(autoincrement())
-  userId        BigInt   @map("user_id")
-  sessionSetId  String   @db.Uuid @map("session_set_id")
-  brickId       String   @map("brick_id")
-  voteEventId   BigInt?  @map("vote_event_id")
-  countedAt     DateTime @default(now()) @map("counted_at")
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @map("user_id")
+  sessionSetId String   @map("session_set_id") @db.Uuid
+  brickId      String   @map("brick_id")
+  voteEventId  BigInt?  @map("vote_event_id")
+  countedAt    DateTime @default(now()) @map("counted_at")
 
   @@unique([userId, sessionSetId, brickId])
   @@index([userId, sessionSetId])
@@ -670,10 +682,10 @@ model UserSessionBrickCount {
 model UserStreakState {
   userId                       BigInt    @id @map("user_id")
   morningStreak                Int       @default(0) @map("morning_streak")
-  morningLastCompletedLocalDay DateTime? @db.Date @map("morning_last_completed_local_day")
+  morningLastCompletedLocalDay DateTime? @map("morning_last_completed_local_day") @db.Date
   morningLongest               Int       @default(0) @map("morning_longest")
   eveningStreak                Int       @default(0) @map("evening_streak")
-  eveningLastCompletedLocalDay DateTime? @db.Date @map("evening_last_completed_local_day")
+  eveningLastCompletedLocalDay DateTime? @map("evening_last_completed_local_day") @db.Date
   eveningLongest               Int       @default(0) @map("evening_longest")
   updatedAt                    DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -695,14 +707,14 @@ model ActiveVote {
 }
 
 model SessionCompletionEvent {
-  id                       BigInt      @id @default(autoincrement())
-  userId                   BigInt      @map("user_id")
-  sessionSetId             String      @db.Uuid @map("session_set_id")
-  kind                     SessionKind
-  localDayKey              DateTime    @db.Date @map("local_day_key")
-  streakAfterCompletion    Int         @map("streak_after_completion")
-  triggeredByVoteEventId   BigInt      @map("triggered_by_vote_event_id")
-  createdAt                DateTime    @default(now()) @map("created_at")
+  id                     BigInt      @id @default(autoincrement())
+  userId                 BigInt      @map("user_id")
+  sessionSetId           String      @map("session_set_id") @db.Uuid
+  kind                   SessionKind
+  localDayKey            DateTime    @map("local_day_key") @db.Date
+  streakAfterCompletion  Int         @map("streak_after_completion")
+  triggeredByVoteEventId BigInt      @map("triggered_by_vote_event_id")
+  createdAt              DateTime    @default(now()) @map("created_at")
 
   @@unique([userId, sessionSetId])
   @@index([userId, createdAt(sort: Desc)])
@@ -711,13 +723,13 @@ model SessionCompletionEvent {
 }
 
 model SessionWindowExpiryEvent {
-  id                    BigInt      @id @default(autoincrement())
-  userId                BigInt      @map("user_id")
-  sessionSetId          String      @db.Uuid @map("session_set_id")
-  kind                  SessionKind
-  localDayKey           DateTime    @db.Date @map("local_day_key")
-  partialCountAtExpiry  Int         @map("partial_count_at_expiry")
-  createdAt             DateTime    @default(now()) @map("created_at")
+  id                   BigInt      @id @default(autoincrement())
+  userId               BigInt      @map("user_id")
+  sessionSetId         String      @map("session_set_id") @db.Uuid
+  kind                 SessionKind
+  localDayKey          DateTime    @map("local_day_key") @db.Date
+  partialCountAtExpiry Int         @map("partial_count_at_expiry")
+  createdAt            DateTime    @default(now()) @map("created_at")
 
   @@unique([userId, sessionSetId])
   @@index([userId, createdAt(sort: Desc)])
@@ -725,12 +737,12 @@ model SessionWindowExpiryEvent {
 }
 
 model StreakBreakEvent {
-  id           BigInt      @id @default(autoincrement())
-  userId       BigInt      @map("user_id")
-  kind         SessionKind
-  fromStreak   Int         @map("from_streak")
-  localDayKey  DateTime    @db.Date @map("local_day_key")
-  createdAt    DateTime    @default(now()) @map("created_at")
+  id          BigInt      @id @default(autoincrement())
+  userId      BigInt      @map("user_id")
+  kind        SessionKind
+  fromStreak  Int         @map("from_streak")
+  localDayKey DateTime    @map("local_day_key") @db.Date
+  createdAt   DateTime    @default(now()) @map("created_at")
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("streak_break_events")
@@ -776,31 +788,31 @@ enum AssignmentStatus {
 }
 
 model ChallengeTemplate {
-  id                          BigInt          @id @default(autoincrement())
-  code                        String          @unique @db.VarChar(120)
-  displayTitle                String          @map("display_title")
-  descriptionTemplate         String          @map("description_template")
-  challengeFamily             ChallengeFamily @map("challenge_family")
-  scope                       ChallengeScope
-  difficultyBandMin           Int             @default(1)  @map("difficulty_band_min")
-  difficultyBandMax           Int             @default(99) @map("difficulty_band_max")
-  eligibleLifecycleStates     String[]        @map("eligible_lifecycle_states")
-  requiresContributionAccess  Boolean         @default(false) @map("requires_contribution_access")
-  requiresStaleTargets        Boolean         @default(false) @map("requires_stale_targets")
-  requiresCategoryTarget      Boolean         @default(false) @map("requires_category_target")
-  requiresSessionTarget       Boolean         @default(false) @map("requires_session_target")
-  isActive                    Boolean         @default(true)  @map("is_active")
-  logicDefinition             Json            @map("logic_definition")
-  rewardXpBase                Int             @map("reward_xp_base")
-  rewardXpBonus               Int             @default(0) @map("reward_xp_bonus")
-  targetCount                 Int             @map("target_count")
-  timeWindow                  Json?           @map("time_window")
-  logicVersion                String          @default("m3c_v1") @db.VarChar(32) @map("logic_version")
-  createdAt                   DateTime        @default(now()) @map("created_at")
-  updatedAt                   DateTime        @default(now()) @updatedAt @map("updated_at")
+  id                         BigInt          @id @default(autoincrement())
+  code                       String          @unique @db.VarChar(120)
+  displayTitle               String          @map("display_title")
+  descriptionTemplate        String          @map("description_template")
+  challengeFamily            ChallengeFamily @map("challenge_family")
+  scope                      ChallengeScope
+  difficultyBandMin          Int             @default(1) @map("difficulty_band_min")
+  difficultyBandMax          Int             @default(99) @map("difficulty_band_max")
+  eligibleLifecycleStates    String[]        @map("eligible_lifecycle_states")
+  requiresContributionAccess Boolean         @default(false) @map("requires_contribution_access")
+  requiresStaleTargets       Boolean         @default(false) @map("requires_stale_targets")
+  requiresCategoryTarget     Boolean         @default(false) @map("requires_category_target")
+  requiresSessionTarget      Boolean         @default(false) @map("requires_session_target")
+  isActive                   Boolean         @default(true) @map("is_active")
+  logicDefinition            Json            @map("logic_definition")
+  rewardXpBase               Int             @map("reward_xp_base")
+  rewardXpBonus              Int             @default(0) @map("reward_xp_bonus")
+  targetCount                Int             @map("target_count")
+  timeWindow                 Json?           @map("time_window")
+  logicVersion               String          @default("m3c_v1") @map("logic_version") @db.VarChar(32)
+  createdAt                  DateTime        @default(now()) @map("created_at")
+  updatedAt                  DateTime        @default(now()) @updatedAt @map("updated_at")
 
-  dailyPoolEntries  ChallengeDailyPool[]
-  userAssignments   UserChallengeAssignment[]
+  dailyPoolEntries ChallengeDailyPool[]
+  userAssignments  UserChallengeAssignment[]
 
   @@index([challengeFamily, isActive])
   @@index([scope, isActive])
@@ -809,7 +821,7 @@ model ChallengeTemplate {
 
 model ChallengeDailyPool {
   id              BigInt          @id @default(autoincrement())
-  challengeDate   DateTime        @db.Date @map("challenge_date")
+  challengeDate   DateTime        @map("challenge_date") @db.Date
   templateId      BigInt          @map("template_id")
   family          ChallengeFamily
   slotType        DailySlotType   @map("slot_type")
@@ -826,26 +838,26 @@ model ChallengeDailyPool {
 }
 
 model UserChallengeAssignment {
-  id                    BigInt           @id @default(autoincrement())
-  userId                BigInt           @map("user_id")
-  templateId            BigInt           @map("template_id")
-  scope                 ChallengeScope
-  assignmentDate        DateTime?        @db.Date @map("assignment_date")
-  assignmentWeekKey     DateTime?        @db.Date @map("assignment_week_key")
-  weeklySlotType        WeeklySlotType?  @map("weekly_slot_type")
-  status                AssignmentStatus @default(assigned)
-  targetCount           Int              @map("target_count")
-  progressCount         Int              @default(0) @map("progress_count")
-  isOverlapWithSession  Boolean          @default(false) @map("is_overlap_with_session")
-  eligibilitySnapshot   Json             @map("eligibility_snapshot")
-  assignedAt            DateTime         @default(now()) @map("assigned_at")
-  completedAt           DateTime?        @map("completed_at")
-  expiresAt             DateTime         @map("expires_at")
-  createdAt             DateTime         @default(now()) @map("created_at")
-  updatedAt             DateTime         @default(now()) @updatedAt @map("updated_at")
+  id                   BigInt           @id @default(autoincrement())
+  userId               BigInt           @map("user_id")
+  templateId           BigInt           @map("template_id")
+  scope                ChallengeScope
+  assignmentDate       DateTime?        @map("assignment_date") @db.Date
+  assignmentWeekKey    DateTime?        @map("assignment_week_key") @db.Date
+  weeklySlotType       WeeklySlotType?  @map("weekly_slot_type")
+  status               AssignmentStatus @default(assigned)
+  targetCount          Int              @map("target_count")
+  progressCount        Int              @default(0) @map("progress_count")
+  isOverlapWithSession Boolean          @default(false) @map("is_overlap_with_session")
+  eligibilitySnapshot  Json             @map("eligibility_snapshot")
+  assignedAt           DateTime         @default(now()) @map("assigned_at")
+  completedAt          DateTime?        @map("completed_at")
+  expiresAt            DateTime         @map("expires_at")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  template          ChallengeTemplate            @relation(fields: [templateId], references: [id])
-  completionEvents  ChallengeCompletionEvent[]
+  template         ChallengeTemplate          @relation(fields: [templateId], references: [id])
+  completionEvents ChallengeCompletionEvent[]
 
   @@index([userId, assignmentDate])
   @@index([userId, status, scope])
@@ -854,14 +866,14 @@ model UserChallengeAssignment {
 }
 
 model ChallengeCompletionEvent {
-  id                      BigInt         @id @default(autoincrement())
-  userId                  BigInt         @map("user_id")
-  challengeAssignmentId   BigInt         @map("challenge_assignment_id")
-  scope                   ChallengeScope
-  completedAt             DateTime       @default(now()) @map("completed_at")
-  xpAwarded               Int            @map("xp_awarded")
-  idempotencyKey          String         @unique @db.VarChar(255) @map("idempotency_key")
-  createdAt               DateTime       @default(now()) @map("created_at")
+  id                    BigInt         @id @default(autoincrement())
+  userId                BigInt         @map("user_id")
+  challengeAssignmentId BigInt         @map("challenge_assignment_id")
+  scope                 ChallengeScope
+  completedAt           DateTime       @default(now()) @map("completed_at")
+  xpAwarded             Int            @map("xp_awarded")
+  idempotencyKey        String         @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt             DateTime       @default(now()) @map("created_at")
 
   assignment UserChallengeAssignment @relation(fields: [challengeAssignmentId], references: [id])
 
@@ -873,12 +885,12 @@ model ChallengeCompletionEvent {
 model PerfectDayEvent {
   id                  BigInt   @id @default(autoincrement())
   userId              BigInt   @map("user_id")
-  localDate           DateTime @db.Date @map("local_date")
+  localDate           DateTime @map("local_date") @db.Date
   morningCompleted    Boolean  @map("morning_completed")
   eveningCompleted    Boolean  @map("evening_completed")
   allDailiesCompleted Boolean  @map("all_dailies_completed")
   perfectDayAwarded   Boolean  @default(true) @map("perfect_day_awarded")
-  idempotencyKey      String   @unique @db.VarChar(255) @map("idempotency_key")
+  idempotencyKey      String   @unique @map("idempotency_key") @db.VarChar(255)
   createdAt           DateTime @default(now()) @map("created_at")
 
   @@unique([userId, localDate])
@@ -890,11 +902,253 @@ model ChallengeAssignmentLog {
   id             BigInt   @id @default(autoincrement())
   userId         BigInt   @map("user_id")
   templateId     BigInt   @map("template_id")
-  assignmentDate DateTime @db.Date @map("assignment_date")
+  assignmentDate DateTime @map("assignment_date") @db.Date
   decision       String
   reasonDetail   Json?    @map("reason_detail")
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([userId, assignmentDate])
   @@map("challenge_assignment_log")
+}
+
+// ── M3d — Leaderboards and Rewards ─────────────────────────────────────────────
+
+enum LeaderboardScope {
+  lifetime
+  weekly
+  monthly
+}
+
+enum LeaderboardMetricType {
+  collector_xp
+  approved_contribution_weight
+  dex_completion_percent
+}
+
+enum LeaderboardTieBreakRule {
+  earliest_to_score
+}
+
+enum PlacementTier {
+  top_1
+  top_3
+  top_10
+}
+
+enum RewardType {
+  calling_card
+  badge
+  flourish
+  title
+}
+
+enum RewardSource {
+  leaderboard
+  milestone
+  secret
+  admin_grant
+  migration
+}
+
+enum InboxEntryType {
+  level_up
+  contribution_approved
+  contribution_rejected
+  daily_completed
+  weekly_completed
+  perfect_day
+  leaderboard_reward
+  streak_broken
+  system_notice
+}
+
+model LeaderboardDefinition {
+  id                       BigInt                  @id @default(autoincrement())
+  leaderboardKey           String                  @unique @map("leaderboard_key") @db.VarChar(80)
+  scope                    LeaderboardScope
+  metricType               LeaderboardMetricType   @map("metric_type")
+  eligibilityRule          Json                    @default("{}") @map("eligibility_rule")
+  tieBreakRule             LeaderboardTieBreakRule @default(earliest_to_score) @map("tie_break_rule")
+  rewardEnabled            Boolean                 @default(false) @map("reward_enabled")
+  periodDefinition         Json?                   @map("period_definition")
+  antiSnipingWindowSeconds Int?                    @map("anti_sniping_window_seconds")
+  isActive                 Boolean                 @default(true) @map("is_active")
+  logicVersion             String                  @default("m3d_v1") @map("logic_version") @db.VarChar(32)
+  createdAt                DateTime                @default(now()) @map("created_at")
+  updatedAt                DateTime                @default(now()) @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([scope, isActive])
+  @@map("leaderboard_definitions")
+}
+
+model LeaderboardState {
+  id                BigInt    @id @default(autoincrement())
+  leaderboardKey    String    @map("leaderboard_key") @db.VarChar(80)
+  periodKey         String    @map("period_key") @db.VarChar(20)
+  userId            BigInt    @map("user_id")
+  score             Decimal   @default(0) @db.Decimal(18, 4)
+  eligible          Boolean   @default(false)
+  rank              Int?
+  tieBreakTimestamp DateTime? @map("tie_break_timestamp")
+  tieBreakEventId   BigInt?   @map("tie_break_event_id")
+  lastUpdatedAt     DateTime  @default(now()) @map("last_updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([leaderboardKey, periodKey, userId])
+  @@index([userId, leaderboardKey, periodKey])
+  @@map("leaderboard_state")
+}
+
+model LeaderboardPeriodFinalization {
+  id                 BigInt   @id @default(autoincrement())
+  leaderboardKey     String   @map("leaderboard_key") @db.VarChar(80)
+  periodKey          String   @map("period_key") @db.VarChar(20)
+  finalizedAt        DateTime @default(now()) @map("finalized_at")
+  totalEligibleUsers Int      @default(0) @map("total_eligible_users")
+  topSnapshot        Json     @map("top_snapshot")
+  idempotencyKey     String   @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@unique([leaderboardKey, periodKey])
+  @@index([leaderboardKey, finalizedAt(sort: Desc)])
+  @@map("leaderboard_period_finalizations")
+}
+
+model LeaderboardVisibilitySnapshot {
+  id              BigInt   @id @default(autoincrement())
+  leaderboardKey  String   @map("leaderboard_key") @db.VarChar(80)
+  periodKey       String   @map("period_key") @db.VarChar(20)
+  snapshotTakenAt DateTime @default(now()) @map("snapshot_taken_at")
+  topSnapshot     Json     @map("top_snapshot")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([leaderboardKey, periodKey])
+  @@index([leaderboardKey, snapshotTakenAt(sort: Desc)])
+  @@map("leaderboard_visibility_snapshots")
+}
+
+model LeaderboardReward {
+  id             BigInt        @id @default(autoincrement())
+  leaderboardKey String        @map("leaderboard_key") @db.VarChar(80)
+  periodKey      String        @map("period_key") @db.VarChar(20)
+  placementTier  PlacementTier @map("placement_tier")
+  rewardBundle   Json          @map("reward_bundle")
+  processedAt    DateTime?     @map("processed_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  @@unique([leaderboardKey, periodKey, placementTier])
+  @@index([leaderboardKey, periodKey])
+  @@map("leaderboard_rewards")
+}
+
+model LeaderboardRewardEvent {
+  id                   BigInt        @id @default(autoincrement())
+  userId               BigInt        @map("user_id")
+  leaderboardKey       String        @map("leaderboard_key") @db.VarChar(80)
+  periodKey            String        @map("period_key") @db.VarChar(20)
+  placementTier        PlacementTier @map("placement_tier")
+  rewardBundleSnapshot Json          @map("reward_bundle_snapshot")
+  idempotencyKey       String        @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt            DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, leaderboardKey, periodKey, placementTier])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([leaderboardKey, periodKey])
+  @@map("leaderboard_reward_events")
+}
+
+model CallingCard {
+  id                    BigInt   @id @default(autoincrement())
+  name                  String   @db.VarChar(120)
+  slug                  String   @unique @db.VarChar(120)
+  rarity                String   @default("common") @db.VarChar(32)
+  isHiddenUntilUnlocked Boolean  @default(false) @map("is_hidden_until_unlocked")
+  tiered                Boolean  @default(false)
+  assetRef              String?  @map("asset_ref")
+  isActive              Boolean  @default(true) @map("is_active")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("calling_cards")
+}
+
+model Badge {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @db.VarChar(120)
+  slug      String   @unique @db.VarChar(120)
+  tiered    Boolean  @default(false)
+  assetRef  String?  @map("asset_ref")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("badges")
+}
+
+model Flourish {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @db.VarChar(120)
+  slug      String   @unique @db.VarChar(120)
+  assetRef  String?  @map("asset_ref")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("flourishes")
+}
+
+model Title {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @db.VarChar(120)
+  slug      String   @unique @db.VarChar(120)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("titles")
+}
+
+model UserReward {
+  id         BigInt       @id @default(autoincrement())
+  userId     BigInt       @map("user_id")
+  rewardType RewardType   @map("reward_type")
+  rewardId   BigInt       @map("reward_id")
+  tier       Int?
+  sourceType RewardSource @map("source_type")
+  sourceId   String?      @map("source_id") @db.VarChar(120)
+  unlockedAt DateTime     @default(now()) @map("unlocked_at")
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, rewardType])
+  @@index([sourceType, sourceId])
+  @@map("user_rewards")
+}
+
+model InboxEntry {
+  id            BigInt         @id @default(autoincrement())
+  userId        BigInt         @map("user_id")
+  entryType     InboxEntryType @map("entry_type")
+  title         String         @db.VarChar(200)
+  body          String?
+  referenceType String?        @map("reference_type") @db.VarChar(60)
+  referenceId   String?        @map("reference_id") @db.VarChar(120)
+  metadata      Json           @default("{}")
+  isRead        Boolean        @default(false) @map("is_read")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([referenceType, referenceId])
+  @@map("inbox_entries")
 }

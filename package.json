@@ -15,6 +15,7 @@
     "worker:trust": "node src/scripts/trust-evaluation-worker.js",
     "worker:recheck": "node src/scripts/recheck-worker.js",
     "worker:dex-linker": "node src/scripts/dex-vote-linker.js",
+    "worker:leaderboard": "node src/scripts/leaderboard-worker.js",
     "cleanup:idempotency": "node src/scripts/cleanup-idempotency-keys.js",
     "worker:loop": "node scripts/worker-loop.js",
     "inspect": "node scripts/inspect-db.js",
