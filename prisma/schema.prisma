@@ -735,3 +735,166 @@ model StreakBreakEvent {
   @@index([userId, createdAt(sort: Desc)])
   @@map("streak_break_events")
 }
+
+// ---------------------------------------------------------------------------
+// M3c — Challenge Engine
+// ---------------------------------------------------------------------------
+
+enum ChallengeFamily {
+  vote
+  explore
+  maintain
+  contribute
+  category_mastery
+}
+
+enum ChallengeScope {
+  daily
+  weekly
+}
+
+enum DailySlotType {
+  vote_1
+  vote_2
+  explore
+  maintain
+  category_mastery
+  contribute
+  wildcard
+}
+
+enum WeeklySlotType {
+  maintenance
+  exploration
+  wildcard
+}
+
+enum AssignmentStatus {
+  assigned
+  completed
+  expired
+}
+
+model ChallengeTemplate {
+  id                          BigInt          @id @default(autoincrement())
+  code                        String          @unique @db.VarChar(120)
+  displayTitle                String          @map("display_title")
+  descriptionTemplate         String          @map("description_template")
+  challengeFamily             ChallengeFamily @map("challenge_family")
+  scope                       ChallengeScope
+  difficultyBandMin           Int             @default(1)  @map("difficulty_band_min")
+  difficultyBandMax           Int             @default(99) @map("difficulty_band_max")
+  eligibleLifecycleStates     String[]        @map("eligible_lifecycle_states")
+  requiresContributionAccess  Boolean         @default(false) @map("requires_contribution_access")
+  requiresStaleTargets        Boolean         @default(false) @map("requires_stale_targets")
+  requiresCategoryTarget      Boolean         @default(false) @map("requires_category_target")
+  requiresSessionTarget       Boolean         @default(false) @map("requires_session_target")
+  isActive                    Boolean         @default(true)  @map("is_active")
+  logicDefinition             Json            @map("logic_definition")
+  rewardXpBase                Int             @map("reward_xp_base")
+  rewardXpBonus               Int             @default(0) @map("reward_xp_bonus")
+  targetCount                 Int             @map("target_count")
+  timeWindow                  Json?           @map("time_window")
+  logicVersion                String          @default("m3c_v1") @db.VarChar(32) @map("logic_version")
+  createdAt                   DateTime        @default(now()) @map("created_at")
+  updatedAt                   DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  dailyPoolEntries  ChallengeDailyPool[]
+  userAssignments   UserChallengeAssignment[]
+
+  @@index([challengeFamily, isActive])
+  @@index([scope, isActive])
+  @@map("challenge_templates")
+}
+
+model ChallengeDailyPool {
+  id              BigInt          @id @default(autoincrement())
+  challengeDate   DateTime        @db.Date @map("challenge_date")
+  templateId      BigInt          @map("template_id")
+  family          ChallengeFamily
+  slotType        DailySlotType   @map("slot_type")
+  position        Int
+  generatedReason String?         @map("generated_reason")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  template ChallengeTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([challengeDate, slotType])
+  @@index([challengeDate])
+  @@index([templateId])
+  @@map("challenge_daily_pool")
+}
+
+model UserChallengeAssignment {
+  id                    BigInt           @id @default(autoincrement())
+  userId                BigInt           @map("user_id")
+  templateId            BigInt           @map("template_id")
+  scope                 ChallengeScope
+  assignmentDate        DateTime?        @db.Date @map("assignment_date")
+  assignmentWeekKey     DateTime?        @db.Date @map("assignment_week_key")
+  weeklySlotType        WeeklySlotType?  @map("weekly_slot_type")
+  status                AssignmentStatus @default(assigned)
+  targetCount           Int              @map("target_count")
+  progressCount         Int              @default(0) @map("progress_count")
+  isOverlapWithSession  Boolean          @default(false) @map("is_overlap_with_session")
+  eligibilitySnapshot   Json             @map("eligibility_snapshot")
+  assignedAt            DateTime         @default(now()) @map("assigned_at")
+  completedAt           DateTime?        @map("completed_at")
+  expiresAt             DateTime         @map("expires_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @default(now()) @updatedAt @map("updated_at")
+
+  template          ChallengeTemplate            @relation(fields: [templateId], references: [id])
+  completionEvents  ChallengeCompletionEvent[]
+
+  @@index([userId, assignmentDate])
+  @@index([userId, status, scope])
+  @@index([userId, assignmentWeekKey])
+  @@map("user_challenge_assignments")
+}
+
+model ChallengeCompletionEvent {
+  id                      BigInt         @id @default(autoincrement())
+  userId                  BigInt         @map("user_id")
+  challengeAssignmentId   BigInt         @map("challenge_assignment_id")
+  scope                   ChallengeScope
+  completedAt             DateTime       @default(now()) @map("completed_at")
+  xpAwarded               Int            @map("xp_awarded")
+  idempotencyKey          String         @unique @db.VarChar(255) @map("idempotency_key")
+  createdAt               DateTime       @default(now()) @map("created_at")
+
+  assignment UserChallengeAssignment @relation(fields: [challengeAssignmentId], references: [id])
+
+  @@index([userId, completedAt(sort: Desc)])
+  @@index([challengeAssignmentId])
+  @@map("challenge_completion_events")
+}
+
+model PerfectDayEvent {
+  id                  BigInt   @id @default(autoincrement())
+  userId              BigInt   @map("user_id")
+  localDate           DateTime @db.Date @map("local_date")
+  morningCompleted    Boolean  @map("morning_completed")
+  eveningCompleted    Boolean  @map("evening_completed")
+  allDailiesCompleted Boolean  @map("all_dailies_completed")
+  perfectDayAwarded   Boolean  @default(true) @map("perfect_day_awarded")
+  idempotencyKey      String   @unique @db.VarChar(255) @map("idempotency_key")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, localDate])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("perfect_day_events")
+}
+
+model ChallengeAssignmentLog {
+  id             BigInt   @id @default(autoincrement())
+  userId         BigInt   @map("user_id")
+  templateId     BigInt   @map("template_id")
+  assignmentDate DateTime @db.Date @map("assignment_date")
+  decision       String
+  reasonDetail   Json?    @map("reason_detail")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([userId, assignmentDate])
+  @@map("challenge_assignment_log")
+}

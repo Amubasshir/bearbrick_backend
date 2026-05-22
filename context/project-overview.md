@@ -232,7 +232,7 @@ The full XP spec (64 pages, canonical developer specification) has been reviewed
 
 ### M3b — Sessions and Streaks
 
-**Status:** Not started.
+**Status:** completed.
 
 **Scope:**
 
@@ -266,7 +266,7 @@ The full XP spec (64 pages, canonical developer specification) has been reviewed
 
 ### M3c — Challenge Engine
 
-**Status:** Not started.
+**Status:** finished
 
 **Scope:**
 
