@@ -9,6 +9,9 @@ const dexFamiliesRoutes = require('./routes/dex-families');
 const adminDashboardRoutes = require('./routes/admin-dashboard');
 const sessionsRoutes = require('./routes/sessions');
 const challengesRoutes = require('./routes/challenges');
+const leaderboardsRoutes = require('./routes/leaderboards');
+const rewardsRoutes = require('./routes/rewards');
+const inboxRoutes = require('./routes/inbox');
 
 const app = express();
 
@@ -55,6 +58,9 @@ app.use("/api", dexFamiliesRoutes);
 app.use("/api", adminDashboardRoutes);
 app.use("/api", sessionsRoutes);
 app.use("/api", challengesRoutes);
+app.use("/api", leaderboardsRoutes);
+app.use("/api", rewardsRoutes);
+app.use("/api", inboxRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
