@@ -50,21 +50,29 @@ async function signup(name, email, password, emailVerified = false) {
   // Hash password
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  // Create user with identity state
-  const user = await prisma.user.create({
-    data: {
-      name,
-      email,
-      password: hashedPassword,
-      email_verified_at: emailVerified ? new Date() : null,
-      identityState: {
-        create: {
-          emailVerified: emailVerified,
-          trustTier: 0,
-          behaviorState: "NORMAL",
+  // Create user with identity state + an opening bounty balance row, atomically
+  // (M4 D3 / Q12 — every new user gets exactly one user_balances row on signup).
+  const user = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        email_verified_at: emailVerified ? new Date() : null,
+        identityState: {
+          create: {
+            emailVerified: emailVerified,
+            trustTier: 0,
+            behaviorState: "NORMAL",
+          },
         },
       },
-    },
+    });
+    await tx.$executeRawUnsafe(
+      `INSERT INTO user_balances (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+      created.id
+    );
+    return created;
   });
 
   // Generate token

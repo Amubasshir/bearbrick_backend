@@ -14,6 +14,11 @@ model User {
   email_verified_at DateTime?
   isAdmin           Boolean   @default(false) @map("is_admin")
   timezone          String    @default("UTC")
+  // M4 (bounty) auth-foundation columns. is_admin / email_verified_at already
+  // existed; these are the only new ones (D1).
+  accountState      AccountState @default(active) @map("account_state")
+  paypalHandle      String?      @map("paypal_handle")
+  venmoHandle       String?      @map("venmo_handle")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -66,6 +71,17 @@ enum XpReason {
   DEX_STAGE1
   DEX_STAGE3
   DEX_STREAK
+  CONTRIBUTION
+}
+
+// M4 (bounty) account-state machine. Gates bounty submission; the richer role
+// enum + permission_overrides are deferred to the dedicated auth milestone (D1).
+enum AccountState {
+  active
+  email_unverified
+  read_only
+  suspended_temporary
+  banned_permanent
 }
 
 enum TrustTier {
@@ -395,6 +411,16 @@ model Brick {
   status           BrickStatus @default(UNRELEASED)
   releasedAt       DateTime?   @map("released_at")
   familyId         String?     @map("family_id")
+  // M4 (bounty) target fields. Additive nullable columns the auto-bounty
+  // generator scans for missing data (Q11). No behavior change to existing code.
+  packagingFrontImageUrl String? @map("packaging_front_image_url")
+  packagingBackImageUrl  String? @map("packaging_back_image_url")
+  backImageUrl           String? @map("back_image_url")
+  sideImageUrl           String? @map("side_image_url")
+  bottomStampImageUrl    String? @map("bottom_stamp_image_url")
+  releaseYear            Int?    @map("release_year")
+  releaseMethod          String? @map("release_method")
+  notes                  String?
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
@@ -1151,4 +1177,157 @@ model InboxEntry {
   @@index([userId, createdAt(sort: Desc)])
   @@index([referenceType, referenceId])
   @@map("inbox_entries")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestone 4 — Bounty System MVP (Phase A)
+// Own PKs are UUID per spec; user_id is BigInt -> "User", brick_id is TEXT ->
+// bricks (this codebase's actual id types). FK columns are modeled as scalars
+// without @relation blocks, matching the existing VoteEvent.brickId precedent.
+// The bounty_instances `unique_open_bounty` partial unique index is SQL-only
+// (Prisma can't express partial uniques), like the bricks.search_tsv column.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BountyDefinition {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type            String   @unique
+  displayName     String   @map("display_name")
+  description     String?
+  rewardCashCents Int      @default(0) @map("reward_cash_cents")
+  rewardCredits   Int      @default(0) @map("reward_credits")
+  priority        String
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("bounty_definitions")
+}
+
+model BountyInstance {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  brickId            String    @map("brick_id")
+  bountyDefinitionId String    @map("bounty_definition_id") @db.Uuid
+  targetField        String    @map("target_field")
+  status             String    @default("OPEN")
+  createdBy          String    @default("SYSTEM") @map("created_by")
+  closedAt           DateTime? @map("closed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([brickId, status])
+  @@index([status])
+  @@map("bounty_instances")
+}
+
+model BountySubmission {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bountyInstanceId String    @map("bounty_instance_id") @db.Uuid
+  brickId          String    @map("brick_id")
+  userId           BigInt    @map("user_id")
+  submissionType   String    @map("submission_type")
+  contentUrl       String?   @map("content_url")
+  contentText      String?   @map("content_text")
+  sourceUrl        String?   @map("source_url")
+  notes            String?
+  status           String    @default("PENDING")
+  rejectionReasons String[]  @map("rejection_reasons")
+  adminNotes       String?   @map("admin_notes")
+  reviewedBy       BigInt?   @map("reviewed_by")
+  reviewedAt       DateTime? @map("reviewed_at")
+  cashRewardCents  Int       @default(0) @map("cash_reward_cents")
+  creditReward     Int       @default(0) @map("credit_reward")
+  xpReward         Int       @default(0) @map("xp_reward")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([bountyInstanceId])
+  @@index([brickId])
+  @@map("bounty_submissions")
+}
+
+model UserBalance {
+  userId                  BigInt   @id @map("user_id")
+  cashBalanceCents        Int      @default(0) @map("cash_balance_cents")
+  reservedCashCents       Int      @default(0) @map("reserved_cash_cents")
+  creditBalance           Int      @default(0) @map("credit_balance")
+  lifetimeCashEarnedCents Int      @default(0) @map("lifetime_cash_earned_cents")
+  lifetimeCreditsEarned   Int      @default(0) @map("lifetime_credits_earned")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@map("user_balances")
+}
+
+model BountyRewardEvent {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             BigInt   @map("user_id")
+  bountySubmissionId String   @map("bounty_submission_id") @db.Uuid
+  cashDeltaCents     Int      @default(0) @map("cash_delta_cents")
+  creditDelta        Int      @default(0) @map("credit_delta")
+  xpDelta            Int      @default(0) @map("xp_delta")
+  eventType          String   @map("event_type")
+  idempotencyKey     String   @unique @map("idempotency_key")
+  createdBy          BigInt?  @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@unique([bountySubmissionId, eventType])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("bounty_reward_events")
+}
+
+model PayoutRequest {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         BigInt    @map("user_id")
+  amountCents    Int       @map("amount_cents")
+  payoutMethod   String    @map("payout_method")
+  payoutHandle   String    @map("payout_handle")
+  status         String    @default("REQUESTED")
+  adminNotes     String?   @map("admin_notes")
+  reviewedBy     BigInt?   @map("reviewed_by")
+  reviewedAt     DateTime? @map("reviewed_at")
+  paidAt         DateTime? @map("paid_at")
+  idempotencyKey String?   @unique @map("idempotency_key")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@map("payout_requests")
+}
+
+model UserBountyStats {
+  userId                 BigInt    @id @map("user_id")
+  totalSubmissions       Int       @default(0) @map("total_submissions")
+  pendingSubmissions     Int       @default(0) @map("pending_submissions")
+  acceptedSubmissions    Int       @default(0) @map("accepted_submissions")
+  rejectedSubmissions    Int       @default(0) @map("rejected_submissions")
+  approvalRate           Decimal   @default(0) @map("approval_rate") @db.Decimal(5, 2)
+  dailySubmissionCount   Int       @default(0) @map("daily_submission_count")
+  dailySubmissionLimit   Int       @default(10) @map("daily_submission_limit")
+  dailySubmissionResetAt DateTime? @map("daily_submission_reset_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("user_bounty_stats")
+}
+
+model AdminSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_settings")
+}
+
+model PayoutActionEvent {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payoutRequestId String   @map("payout_request_id") @db.Uuid
+  actorUserId     BigInt?  @map("actor_user_id")
+  action          String
+  notes           String?
+  idempotencyKey  String?  @unique @map("idempotency_key")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([payoutRequestId, createdAt])
+  @@map("payout_action_events")
 }
