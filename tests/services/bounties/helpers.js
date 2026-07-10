@@ -45,9 +45,9 @@ async function createBrick({ fields = {}, tag = 'a3' } = {}) {
 async function cleanup() {
   const uids = created.userIds.map(String);
   const bids = created.brickIds;
-  // Child rows are deleted before their parents (every FK here is ON DELETE
-  // RESTRICT). Order: payout audit -> payouts -> reward ledger -> submissions ->
-  // instances -> stats/balances -> xp keys -> xp events -> bricks -> users.
+  // Child rows are deleted before their parents. Order: payout audit -> payouts
+  // -> reward ledger -> submissions -> instances -> stats/balances -> xp keys ->
+  // xp events -> session set items -> bricks -> users.
   if (uids.length) {
     await prisma.$executeRawUnsafe(
       `DELETE FROM payout_action_events
@@ -79,6 +79,15 @@ async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM user_identity_state WHERE user_id = ANY($1::bigint[])`, uids);
   }
   if (bids.length) {
+    // The M3b session builder (getOrBuildSetForDay) picks from ALL published
+    // bricks, so on a small pool (fresh/CI DB) a tracked bounty-test brick can
+    // land in a global session set. Purge those items (tracked ids only) before
+    // deleting the bricks they reference, or the bricks delete hits the
+    // daily_session_set_items_brick_id_fkey constraint.
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM daily_session_set_items WHERE brick_id = ANY($1::text[])`,
+      bids
+    );
     await prisma.$executeRawUnsafe(`DELETE FROM bricks WHERE id = ANY($1::text[])`, bids);
   }
   if (uids.length) {
@@ -88,35 +97,15 @@ async function cleanup() {
   created.brickIds.length = 0;
 }
 
-// admin_settings is a single global key/value table shared by every test. The
-// A4 money tests mutate it (monthly_cash_spent_cents, budget), so they snapshot
-// it before and restore after to leave zero net effect on the shared dev DB.
-const ADMIN_KEYS = [
-  'monthly_cash_budget_cents', 'monthly_cash_spent_cents',
-  'cash_rewards_enabled', 'minimum_payout_cents', 'monthly_budget_last_reset_period',
-];
-
-async function snapshotAdminSettings() {
-  const rows = await prisma.$queryRawUnsafe(`SELECT key, value FROM admin_settings`);
-  const snap = {};
-  for (const r of rows) snap[r.key] = r.value;
-  return snap;
-}
-
+// admin_settings is a single global key/value row shared by every test. Suites
+// set only the specific keys they depend on and reset them to their seeded
+// defaults — never snapshot-and-restore the shared row (a restore can re-persist
+// another suite's transient value, deterministically polluting the seeded defaults).
 async function setAdminSetting(key, value) {
   await prisma.$executeRawUnsafe(
     `UPDATE admin_settings SET value = $2, updated_at = NOW() WHERE key = $1`,
     key, String(value)
   );
-}
-
-async function restoreAdminSettings(snap) {
-  for (const key of ADMIN_KEYS) {
-    if (snap[key] !== undefined) {
-      // eslint-disable-next-line no-await-in-loop
-      await setAdminSetting(key, snap[key]);
-    }
-  }
 }
 
 async function balanceFor(userId) {
@@ -182,6 +171,6 @@ async function statsFor(userId) {
 
 module.exports = {
   prisma, created, createUser, createBrick, cleanup, instanceIdByType, statsFor,
-  snapshotAdminSettings, restoreAdminSettings, setAdminSetting,
+  setAdminSetting,
   balanceFor, rewardEventsFor, xpEventsFor, payoutsFor, payoutActionsFor, seedBalance,
 };

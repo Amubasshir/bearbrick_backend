@@ -7,13 +7,15 @@
 // no-op / reject release / multiple-pending accounting), the signup balance
 // hook, and determinism (captured-at-submission rewards).
 //
-// admin_settings is global and shared, so this single file owns all mutations to
-// it: snapshot in beforeAll, restore in afterAll, baseline reset between. Default
-// jest parallelism is safe because no other suite touches admin_settings.
+// admin_settings is a global shared row. This suite sets the specific keys it
+// depends on to their seeded defaults in beforeAll and resets them explicitly in
+// afterAll — it never snapshot/restores the shared row (a restore can re-persist
+// another suite's transient value; that pollution vector broke a reader suite once
+// and is now closed). In-test mutations (spent / cash_rewards_enabled) are reset
+// back to baseline within each test.
 
 const {
-  prisma, createUser, createBrick, cleanup, instanceIdByType,
-  snapshotAdminSettings, restoreAdminSettings, setAdminSetting,
+  prisma, createUser, createBrick, cleanup, instanceIdByType, setAdminSetting,
   balanceFor, rewardEventsFor, xpEventsFor, payoutsFor, payoutActionsFor, seedBalance, created,
 } = require('./helpers');
 const Inst = require('../../../src/services/bounties/BountyInstanceService');
@@ -24,11 +26,10 @@ const Payout = require('../../../src/services/bounties/PayoutService');
 const Auth = require('../../../src/services/AuthService');
 const MonthlyReset = require('../../../src/scripts/monthly-budget-reset-worker');
 
-let adminSnapshot;
-
 beforeAll(async () => {
-  adminSnapshot = await snapshotAdminSettings();
   // Known baseline so cash assertions are deterministic regardless of dev-DB drift.
+  // Set each key explicitly to its seeded default — never snapshot/restore the
+  // shared global row (a restore can re-persist another suite's transient value).
   await setAdminSetting('monthly_cash_budget_cents', 50000);
   await setAdminSetting('monthly_cash_spent_cents', 0);
   await setAdminSetting('cash_rewards_enabled', 'true');
@@ -36,7 +37,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await restoreAdminSettings(adminSnapshot);
+  // Reset every admin_settings key this suite mutates back to its seeded default
+  // (explicit narrow resets, not a snapshot replay) so the shared row is left
+  // pristine for other suites.
+  await setAdminSetting('monthly_cash_budget_cents', 50000);
+  await setAdminSetting('monthly_cash_spent_cents', 0);
+  await setAdminSetting('cash_rewards_enabled', 'true');
+  await setAdminSetting('minimum_payout_cents', 1000);
+  await setAdminSetting('monthly_budget_last_reset_period', '');
   await cleanup();
 });
 
@@ -430,8 +438,8 @@ describe('AuthService.signup balance hook', () => {
 
 // ---------------------------------------------------------------------------
 // monthly-budget-reset-worker — lives here (not in tests/workers) because it
-// mutates the same GLOBAL admin_settings rows this file already owns via
-// snapshot/restore. Keeping it single-file avoids a cross-file race under
+// mutates the same GLOBAL admin_settings rows this file already owns via its
+// explicit baseline/reset. Keeping it single-file avoids a cross-file race under
 // jest's default parallel test-file execution. The remaining two A5 workers are
 // per-entity and tested in tests/workers/bounty-workers-integration.test.js.
 // ---------------------------------------------------------------------------

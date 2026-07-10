@@ -12,6 +12,9 @@ const challengesRoutes = require('./routes/challenges');
 const leaderboardsRoutes = require('./routes/leaderboards');
 const rewardsRoutes = require('./routes/rewards');
 const inboxRoutes = require('./routes/inbox');
+const bountiesRoutes = require('./routes/bounties');
+const uploadsRoutes = require('./routes/uploads');
+const adminBountiesRoutes = require('./routes/admin-bounties');
 
 const app = express();
 
@@ -61,6 +64,9 @@ app.use("/api", challengesRoutes);
 app.use("/api", leaderboardsRoutes);
 app.use("/api", rewardsRoutes);
 app.use("/api", inboxRoutes);
+app.use("/api", bountiesRoutes);
+app.use("/api", uploadsRoutes);
+app.use("/api", adminBountiesRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

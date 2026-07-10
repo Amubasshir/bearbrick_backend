@@ -3,6 +3,7 @@
  */
 const request = require("supertest");
 const app = require("../../src/app");
+const prisma = require("../../src/lib/prisma");
 
 // Seeded constants
 const BRICK_1 = "11111111-1111-4111-8111-111111111101"; // Series 1 Black, PUBLISHED
@@ -40,6 +41,21 @@ async function createFreshUser(suffix = "") {
   const token = res.body.data?.token;
   const userId = res.body.data?.user?.id;
   return { token, email, userId, name };
+}
+
+/**
+ * Create a fresh user, promote to is_admin=true, and return { token, email, userId }.
+ * The signup-issued JWT stays valid because adminAuth re-reads isAdmin from the DB
+ * per request. This is the standard admin-JWT (hasPermission-path) helper for the
+ * Milestone 4 admin endpoints.
+ */
+async function createFreshAdmin(suffix = "") {
+  const u = await createFreshUser(suffix);
+  await prisma.$executeRawUnsafe(
+    `UPDATE "User" SET is_admin = true WHERE id = $1`,
+    BigInt(u.userId)
+  );
+  return u;
 }
 
 /**
@@ -113,6 +129,7 @@ module.exports = {
   ADMIN_SECRET,
   uniqueEmail,
   createFreshUser,
+  createFreshAdmin,
   loginAs,
   progressToStage3,
   adminReq,

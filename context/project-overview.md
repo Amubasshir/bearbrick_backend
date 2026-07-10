@@ -371,10 +371,12 @@ The following helpers are established and stable across the Milestone 3 series. 
 
 **Baseline:** 424 of 426 tests passing as of M3d delivery. New milestones must preserve this baseline plus add their own tests.
 
+**Phase A update (Milestone 4):** Phase A added ~93 new tests across unit, integration, and worker suites. The full suite on a clean checkout / CI is now **~524 passing** (verified 524/524 on a freshly-migrated throwaway DB). The two flakes below remain the only failures, and only on accumulated local dev DBs.
+
 **Two documented pre-existing flakes** (both diagnosed as local dev-DB-volume accumulation artifacts, not real defects, fixes deferred to a future test hygiene pass):
 
 1. **`tests/api/dex-admin-dashboard.test.js`** — M2-owned test. Its `beforeAll` creates "Feature Toggle Brick" rows without cleanup. Accumulated rows push the test's brick past the `/api/dex/bricks/featured` endpoint's default `limit: 20` page boundary. Documented in `project_m2_flaky_test.md`.
-2. **`tests/workers/leaderboard-worker-integration.test.js` "Q9 UTC period boundary"** — M3d-discovered. Dev DB now holds 572+ confirmed `xp_events` accumulated across prior runs. Test inserts W22 events after the existing max date, but the worker polls `xp_events ORDER BY createdAt ASC, id ASC LIMIT 500`, pushing the W22 events past position 500 and missing the single tick the test runs. Documented in `project_m3d_flaky_test.md`.
+2. **`tests/workers/leaderboard-worker-integration.test.js` "Q9 UTC period boundary"** — M3d-discovered. Dev DB now holds 572+ confirmed `xp_events` accumulated across prior runs. Test inserts W22 events after the existing max date, but the worker polls `xp_events ORDER BY createdAt ASC, id ASC LIMIT 500`, pushing the W22 events past position 500 and missing the single tick the test runs. Documented in `project_m3d_flaky_test.md`. **Phase A clean-DB verification confirmed this root cause deterministically:** on a freshly-migrated throwaway DB the suite passes, and injecting 622 confirmed `xp_events` reproduced the exact documented failures — proving the `LIMIT 500` accumulation cause, not a product defect.
 
 **Rule for future milestones:** do not touch these tests, do not "fix" them, do not patch around them. They are known, documented, and fail on local dev DBs only. On a clean clone or CI they pass.
 
@@ -382,7 +384,7 @@ The following helpers are established and stable across the Milestone 3 series. 
 
 ## Milestone 4 — Bounty System MVP
 
-**Status:** ACTIVE / NOT YET STARTED. Two-phase delivery.
+**Status:** Two-phase delivery. **Phase A (Foundation & money plumbing — Fiverr milestone 1 of 2): SHIPPED.** **Phase B (API surface, API-layer tests, live smoke — milestone 2 of 2): SHIPPED.** All 16 endpoints (7 user + 9 admin) plus a duplicate-field advisory, the real Supabase Storage adapter/wiring, and a green live end-to-end smoke are delivered and verified (clean-DB full suite 716 passing on a freshly-migrated + seeded throwaway DB). See **Phase B — Delivery Notes** below for the as-built figures and the items deferred to future milestones.
 
 ### Purpose
 
@@ -394,12 +396,59 @@ Bounty MVP is explicitly NOT a marketplace, credit store, reviewer network, or a
 
 The milestone is split into two Fiverr milestones with a halfway review checkpoint:
 
-- **Phase A (Milestone 1 of 2):** Foundation and money plumbing. All 13 migrations, core services, atomic approval and approve-and-apply transactions, payout flow, all three background workers, plus unit and integration tests. At the halfway review, bounties auto-generate from missing brick fields, balances update correctly through the approval transaction, payouts flow through the state machine cleanly, and the full test suite is green.
-- **Phase B (Milestone 2 of 2):** API surface and live delivery. 7 user endpoints, 9 admin endpoints, API-layer tests, full live end-to-end smoke against the dev environment with real Supabase Storage, final work log.
+- **Phase A (Milestone 1 of 2) — SHIPPED.** Foundation and money plumbing. 12 additive SQL migrations (seeds folded inline), core services, atomic approval and approve-and-apply transactions, payout flow, all three background workers, plus unit, integration, and worker tests. Exit criteria met at the halfway checkpoint: bounties auto-generate from missing brick fields, balances update correctly through the approval transaction, payouts flow through the state machine cleanly, and the full suite is green on a clean checkout. See **Phase A — Delivery Notes** below for the as-built figures.
+- **Phase B (Milestone 2 of 2) — SHIPPED.** API surface and live delivery. 7 user endpoints, 9 admin endpoints, plus a client-requested duplicate-field advisory warning; parallel-safe API-layer tests; the real Supabase Storage adapter wired at startup with the `bounty-submissions` bucket provisioned; and a green live end-to-end smoke against the dev environment. See **Phase B — Delivery Notes** below for the as-built figures.
+
+### Phase A — Delivery Notes (Shipped)
+
+What actually shipped in Phase A, where it differs from the original plan figures in **Scope** below:
+
+**Migrations — 12 additive SQL migrations (not 13).** Seeds were folded inline into their table migrations (no separate seed migrations); a bricks-prep migration was **added** (the 8 auto-generator target columns did not exist on `bricks` — this resolved open question Q11); and an `XpReason` enum-value migration was **added**. The `bounty-submissions` Supabase Storage bucket is non-SQL config and is deferred to Phase B. The 12 migrations produced **9 new Prisma models** — three of the migrations are ALTERs, not new tables (bricks-prep adds 8 columns, `XpReason ADD VALUE`, and the users auth-fields add columns).
+
+**Auth foundation — what shipped vs. deferred.** Phase A shipped `account_state` (backed by a new `AccountState` enum: active, email_unverified, read_only, suspended_temporary, banned_permanent), `paypal_handle`, and `venmo_handle` on the `User` table, and **reused the existing `is_admin` and `email_verified_at` columns** (both already existed). The `role` enum (user…super_admin) and `permission_overrides` JSONB were **deferred to the future auth milestone**, pending the client's not-yet-shared admin specs. `src/lib/permissions.js#hasRole` currently resolves against `is_admin` with a forward-compatible signature; it switches to the full role/permission model when that milestone ships.
+
+**XP reasons — `XpReason.CONTRIBUTION` added.** Bounty XP is a genuinely new XP source, so Phase A added `CONTRIBUTION` to the `XpReason` enum additively (M3c/M3d had reused `'STREAK'`). All bounty XP (`BOUNTY_SUBMISSION_APPROVED`, `FIRST_APPROVED_BOUNTY`, `TEN_APPROVED_BOUNTIES`, `BRICK_COMPLETED`) is minted with `reason = CONTRIBUTION` through the shared `insertXpEvent` helper.
+
+**Tests.** Phase A added ~93 new tests across unit, integration, and worker suites; the full suite on a clean checkout / CI is ~524 passing (verified 524/524 on a freshly-migrated throwaway DB). See the test-baseline section above for the two pre-existing dev-DB-accumulation flakes (unchanged).
+
+**Open items carried to the Phase-A review (not yet resolved):**
+
+- **XP amounts are placeholders pending client confirmation.** Bounty XP by priority (HIGH 15 / MEDIUM 10 / LOW 5) and milestone XP (FIRST_APPROVED_BOUNTY 25 / TEN_APPROVED_BOUNTIES 100 / BRICK_COMPLETED 50) are proposed defaults — the spec names the XP *events* but pins no amounts. Held in `src/services/bounties/bountyTypes.js`, flagged.
+- **Approve-and-apply after a Simple Approve.** Calling approve-and-apply on an already-APPROVED submission currently **throws `cannot_apply_approved`** to prevent a double reward (the two ledger events carry different idempotency keys). Whether an apply-after-approve (apply-only, no second reward) path is wanted is flagged as a Phase B question.
+- **Admin specs outstanding.** The client's "already-made" admin specs are still needed to scope Phase B's 9 admin endpoints (and to finalize the deferred `role` / `permission_overrides` model).
+
+### Phase B — Delivery Notes (Shipped)
+
+What actually shipped in Phase B, as-built. Additive only; the sole prior-milestone behavior change is the sanctioned approve-and-apply refinement noted below. These notes supersede the plan-era figures in **Scope** below (same convention as the Phase A notes).
+
+**All 16 endpoints delivered — 7 user-facing + 9 admin-facing** (matching the Scope list below), plus a client-requested **duplicate-field advisory warning** surfaced on the admin review queue. Every endpoint is a thin controller over the Phase A services; no business logic moved into the HTTP layer.
+
+**Permission model — two-layer "option-2" auth.** A transport layer and a pure permission layer, in that order:
+
+- `adminAuth` (transport) authorizes admin access. An `X-Admin-Secret` header authorizes _without a user identity_ (`req.user = null`) and short-circuits **above** the permission layer, never reaching it. Otherwise it requires an admin JWT.
+- `hasPermission(user, flag)` in `src/lib/permissions.js` is pure and null-strict: `null` user → `false` **always**, no secret/null awareness. 14 canonical flags, all resolving against `is_admin` this phase (the real role engine remains a future auth milestone).
+- Per-endpoint flags: review endpoints (queue / approve / approve-without-applying / reject) → `can_approve_images`; canonical brick writes (approve-and-apply / manual bounty create / instance PATCH) → `can_edit_bricks`; money & config (definition PATCH / payout queue + PATCH) → `can_manage_settings`.
+
+This is the _shape_ of enforcement only; the layering is future-proofing for real RBAC. It replaces the plan-era "gated by `hasRole(...)`" note in Scope.
+
+**Approve / apply model.** `APPROVED` = rewarded-but-not-applied (the bounty stays OPEN). `approve-and-apply` is idempotency-aware: PENDING → full reward + apply + close; already-APPROVED → apply-only (**no second reward**); already-APPLIED_TO_BRICK → safe no-op. The Phase A `cannot_apply_approved` throw was **replaced** by this apply-only path — the single sanctioned Phase-A behavior change in Phase B. `approve-without-applying` is the plain approve (reward only, no canonical write; bounty stays OPEN).
+
+**Real Supabase Storage.** The injectable seam `src/lib/bountyStorage.js` is backed by a service-role adapter `src/lib/supabaseStorage.js`, wired at startup in `src/server.js` (not `app.js` — keeps the test suite hermetic). Private `bounty-submissions` bucket, 10 MB limit, JPG/PNG allowlist, 1-hour signed URLs. A standalone live end-to-end smoke (`scripts/smoke-bounty-upload.js`, **not** part of `npm test`) passed against real Supabase: upload → signed URL → object verified present → submit (reward captured) → approve-and-apply → balance moved, XP minted, canonical field written, instance closed, then full cleanup.
+
+**Tests.** The clean-DB full suite is **716 passing** (grew from ~524 across Phase B), verified on a freshly-migrated + seeded throwaway DB (**76 suites, 0 failures**). The 3 documented dev-DB flakes (`dex-admin-dashboard`; `dex-profile › "stats shows 1 brick at stage 3"`; `leaderboard-worker-integration`, whose `LIMIT 500` accumulation now swamps several tests of the suite, not just Q9) all pass on a clean DB — proving they are dev-DB-accumulation artifacts, not regressions. Test-hygiene was also hardened: the unsafe `snapshot/restoreAdminSettings` pattern was removed (it could re-persist another suite's transient value of the single global `admin_settings` row under parallel jest), and the shared bounty `cleanup()` now purges `daily_session_set_items` for its tracked bricks before deleting them (the M3b session builder can select a bounty-test brick into a global session set on a small pool).
+
+**Deferred / carried to future work (recorded so the next milestone sees them):**
+
+- **Contribution activation is a real future unit, not a config flip.** M3c `contribute` challenges have an assignment gate (`contribution_system_enabled`) but **no progress path** — nothing emits or consumes `contribution_approved`, and the challenge-progress worker only handles `vote_events`. M3d's `lifetime_/weekly_contribution_weighted` leaderboards are `TODO` stubs (`approved_contribution_weight` → ZERO_SCORE, `min_approved_contributions` → false) over a **non-existent** approved-contribution ledger with undefined weight semantics. Both need new logic (a bounty → challenge-progress bridge, and a real leaderboard weight query with defined semantics), not a flag change. The **Activates Dormant Hooks From M3c and M3d** note below is therefore incomplete as written — flipping the flag alone would make those challenges assignable but never completable.
+- **Canonical brick image field stores an expiring 1-hour signed URL.** `approveAndApply` copies the submission's `content_url` (a 1-hour signed URL) verbatim into the canonical brick image column, so the stored reference expires. It should hold a durable reference (permanent storage path / re-signed-on-read / public URL). Phase-A behavior surfaced by the live smoke.
+- **`mark_paid` allows `REQUESTED → PAID` directly** (bypassing `approve`) — Phase A PayoutService behavior, characterized by a test and flagged.
+- **Bounty XP amounts are still placeholders** (by priority HIGH 15 / MEDIUM 10 / LOW 5; milestones FIRST_APPROVED_BOUNTY 25 / TEN_APPROVED_BOUNTIES 100 / BRICK_COMPLETED 50), pending client confirmation.
+- **The duplicate-field warning is queue-only** — no separate submission-detail endpoint was added (not in the 16-endpoint scope); the `findApprovedUnappliedSiblings` primitive is ready to feed one later.
+- **Test-hygiene backlog (loaded dev DB only):** a pre-existing intermittent cross-suite teardown race — the leaderboard worker populates `leaderboard_state` for a bounty API suite's users, then that suite's shared `cleanup()` `DELETE FROM "User"` hits `leaderboard_state_user_id_fkey`. Observed ~1 in 4 loaded runs; never on a clean DB. Same class as the money-transactions teardown quirk; a proper fix would purge all worker-populated `User` children (leaderboard_state, user_progress_state, session/challenge state, …) in FK order before deleting users.
 
 ### Scope
 
-**Database (13 new migrations, all additive):**
+**Database (12 additive SQL migrations — see _Phase A — Delivery Notes_ above for the count correction and the 9-new-model figure):**
 
 Bounty core (8 tables):
 
@@ -412,19 +461,18 @@ Bounty core (8 tables):
 - `user_bounty_stats` — submission counters and approval rate. Daily limit reset at 5 AM local with UTC fallback.
 - `admin_settings` — monthly budget config, cash-rewards-enabled flag, minimum payout.
 
-Auth foundation (forward-compatible with the locked auth/admin spec):
+Auth foundation (forward-compatible with the locked auth/admin spec) — **as shipped, Phase A added only the minimal set:**
 
-- `users.role` enum column — values: user, trusted_user, moderator, admin, super_admin, developer. Default 'user'.
-- `users.permission_overrides` JSONB nullable — future-ready for per-user flag overrides.
-- `users.email_verified_at` timestamp nullable — image-based bounty submissions gate on this.
-- `users.account_state` enum column — values: active, email_unverified, read_only, suspended_temporary, banned_permanent. Default 'active'.
-- `users.paypal_handle` and `users.venmo_handle` — profile-default payout handles, editable per request.
+- `users.account_state` enum column (new `AccountState` enum) — values: active, email_unverified, read_only, suspended_temporary, banned_permanent. Default 'active'. **Shipped.**
+- `users.paypal_handle` and `users.venmo_handle` — profile-default payout handles, editable per request. **Shipped.**
+- `users.email_verified_at` and `users.is_admin` — **already existed; reused as-is.** Image-based submissions gate on `email_verified_at`; `permissions.js#hasRole` resolves against `is_admin`.
+- `users.role` enum (user, trusted_user, moderator, admin, super_admin, developer) and `users.permission_overrides` JSONB — **DEFERRED to the future auth milestone**, pending the client's not-yet-shared admin specs.
 
 Audit:
 
 - `payout_action_events` — immutable, append-only. One row per payout state transition with actor_user_id, action, timestamp, notes.
 
-Storage:
+Storage (non-SQL config — **deferred to Phase B** live delivery; `ImageUploadService` is built against an injectable storage client so it is unit-testable now):
 
 - Supabase Storage bucket `bounty-submissions` configured with 10 MB size limit, JPG/PNG MIME allowlist, signed URL access.
 
@@ -447,7 +495,7 @@ Storage:
 
 **Library helpers** (`src/lib/`):
 
-- `permissions.js` — `hasRole(user, 'admin' | 'super_admin')` for this milestone. Extends to `hasPermission(user, flag)` when the full auth milestone ships.
+- `permissions.js` — `hasRole(user, 'admin' | 'super_admin')` for this milestone, resolving against the existing `is_admin` column with a forward-compatible signature. Extends to `hasPermission(user, flag)` (and the deferred `role` enum) when the full auth milestone ships.
 - `imageValidation.js` — JPG/PNG, dimension, size checks.
 - `moneyMath.js` — cents-only integer math helpers. No floating-point dollars anywhere in the codebase.
 
@@ -507,7 +555,7 @@ Credits mirror cash in cents at MVP. Cash mirrors credits even when cash rewards
 
 ### Reused From Prior Milestones
 
-- `src/lib/xpEvents.js` for the BOUNTY_SUBMISSION_APPROVED, FIRST_APPROVED_BOUNTY, TEN_APPROVED_BOUNTIES, BRICK_COMPLETED XP event inserts.
+- `src/lib/xpEvents.js` for the BOUNTY_SUBMISSION_APPROVED, FIRST_APPROVED_BOUNTY, TEN_APPROVED_BOUNTIES, BRICK_COMPLETED XP event inserts (all minted with the new `reason = XpReason.CONTRIBUTION` added in Phase A).
 - `xp_idempotency_keys` table for XP-minting idempotency.
 - Per-table `idempotency_key` UNIQUE columns for non-XP one-time operations (`bounty_reward_events`, `payout_action_events`).
 - `pg_advisory_xact_lock` per-user and per-payout for transaction safety.

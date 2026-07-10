@@ -9,9 +9,14 @@
 //      brick's *final* OPEN bounty (Q7).
 //
 // Unlike Simple Approve, this is the action that mutates canonical brick data.
-// It is a terminal action on a PENDING submission — calling it on an
-// already-Simple-Approved submission is rejected (would otherwise double-pay,
-// since the two reward events carry different idempotency keys).
+//
+// Idempotency matrix (Phase B Unit 3.3):
+//   PENDING          -> full reward (approval core) + apply + close (+BRICK_COMPLETED)
+//   APPROVED         -> apply-only: canonical write + close (+BRICK_COMPLETED), NO
+//                       second reward (the reward was already minted by Simple
+//                       Approve under a different idempotency key)
+//   APPLIED_TO_BRICK -> safe no-op
+//   other (REJECTED) -> throws cannot_apply_<status>
 
 const prisma = require('../../lib/prisma');
 const Inst = require('./BountyInstanceService');
@@ -35,6 +40,62 @@ async function loadTargetField(tx, bountyInstanceId) {
   return rows[0] ? rows[0].target_field : null;
 }
 
+/** Load + validate the target column (never attacker-controlled). Throws on bad. */
+async function resolveTargetField(tx, bountyInstanceId) {
+  const targetField = await loadTargetField(tx, bountyInstanceId);
+  if (!targetField || !ALLOWED_COLUMNS.has(targetField)) {
+    throw new ApprovalError('invalid_target_field');
+  }
+  return targetField;
+}
+
+/**
+ * The apply step, shared by the PENDING (full reward) and APPROVED (apply-only)
+ * paths: write the captured value to the brick's canonical field, flip the
+ * submission to APPLIED_TO_BRICK, close the bounty if the field is now filled,
+ * and fire BRICK_COMPLETED iff this apply closed the brick's final OPEN bounty.
+ * Returns { submission, brickClosed, brickCompleted }.
+ */
+async function applyToBrick(tx, submission, targetField, adminUserId, now) {
+  // release_year is the one INTEGER column.
+  let value = submission.submission_type === 'IMAGE'
+    ? submission.content_url : submission.content_text;
+  if (targetField === 'release_year') value = parseInt(value, 10);
+  await tx.$executeRawUnsafe(
+    `UPDATE bricks SET "${targetField}" = $1, updated_at = NOW() WHERE id = $2`,
+    value, submission.brick_id
+  );
+
+  const updated = await tx.$queryRawUnsafe(
+    `UPDATE bounty_submissions
+       SET status = 'APPLIED_TO_BRICK', reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW()
+     WHERE id = $1::uuid RETURNING id, status`,
+    submission.id, adminUserId != null ? BigInt(adminUserId) : null
+  );
+
+  const closeRes = await Inst.closeInstanceIfFieldFilled(tx, submission.bounty_instance_id);
+  let brickCompleted = false;
+  if (closeRes.closed) {
+    const open = await Inst.countOpenForBrick(tx, submission.brick_id);
+    if (open === 0) {
+      const tz = submission.timezone || 'UTC';
+      const localDayKey = toDayKeyString(computeLocalDayKey(now, tz));
+      await insertXpEvent(tx, {
+        userId: BigInt(submission.user_id),
+        xpAmount: MILESTONE_XP.BRICK_COMPLETED,
+        reason: 'CONTRIBUTION',
+        eventType: 'BRICK_COMPLETED',
+        sourceSystem: 'm4',
+        localDayKey,
+        idempotencyKey: `xp:brick_completed:${submission.brick_id}:${submission.user_id}`,
+      });
+      brickCompleted = true;
+    }
+  }
+
+  return { submission: updated[0], brickClosed: closeRes.closed, brickCompleted };
+}
+
 /**
  * Approve+Apply. Returns { submission, idempotent, actualCash, creditReward,
  * xpReward, brickClosed, brickCompleted }.
@@ -51,14 +112,25 @@ async function approveAndApply(prismaClient, { submissionId, adminUserId = null,
         brickClosed: false, brickCompleted: false,
       };
     }
+
+    // Already Simple-Approved -> apply-only: canonical write + close (+BRICK_
+    // COMPLETED), NO second reward. The Simple-Approve reward already fired under
+    // key bounty_reward:{id}:approved, so we deliberately skip the reward core.
+    if (submission.status === 'APPROVED') {
+      const targetField = await resolveTargetField(tx, submission.bounty_instance_id);
+      const applied = await applyToBrick(tx, submission, targetField, adminUserId, now);
+      return {
+        submission: applied.submission,
+        idempotent: false, actualCash: 0, creditReward: 0, xpReward: 0,
+        brickClosed: applied.brickClosed, brickCompleted: applied.brickCompleted,
+      };
+    }
+
     if (submission.status !== 'PENDING') {
       throw new ApprovalError('cannot_apply_' + submission.status.toLowerCase());
     }
 
-    const targetField = await loadTargetField(tx, submission.bounty_instance_id);
-    if (!targetField || !ALLOWED_COLUMNS.has(targetField)) {
-      throw new ApprovalError('invalid_target_field');
-    }
+    const targetField = await resolveTargetField(tx, submission.bounty_instance_id);
 
     const core = await runApprovalCore(tx, {
       submission,
@@ -74,51 +146,16 @@ async function approveAndApply(prismaClient, { submissionId, adminUserId = null,
       };
     }
 
-    // Write the canonical brick field. release_year is the one INTEGER column.
-    let value = submission.submission_type === 'IMAGE'
-      ? submission.content_url : submission.content_text;
-    if (targetField === 'release_year') value = parseInt(value, 10);
-    await tx.$executeRawUnsafe(
-      `UPDATE bricks SET "${targetField}" = $1, updated_at = NOW() WHERE id = $2`,
-      value, submission.brick_id
-    );
-
-    const updated = await tx.$queryRawUnsafe(
-      `UPDATE bounty_submissions
-         SET status = 'APPLIED_TO_BRICK', reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW()
-       WHERE id = $1::uuid RETURNING id, status`,
-      submission.id, adminUserId != null ? BigInt(adminUserId) : null
-    );
-
-    // Close the bounty if the field is now filled, then decide BRICK_COMPLETED.
-    const closeRes = await Inst.closeInstanceIfFieldFilled(tx, submission.bounty_instance_id);
-    let brickCompleted = false;
-    if (closeRes.closed) {
-      const open = await Inst.countOpenForBrick(tx, submission.brick_id);
-      if (open === 0) {
-        const tz = submission.timezone || 'UTC';
-        const localDayKey = toDayKeyString(computeLocalDayKey(now, tz));
-        await insertXpEvent(tx, {
-          userId: BigInt(submission.user_id),
-          xpAmount: MILESTONE_XP.BRICK_COMPLETED,
-          reason: 'CONTRIBUTION',
-          eventType: 'BRICK_COMPLETED',
-          sourceSystem: 'm4',
-          localDayKey,
-          idempotencyKey: `xp:brick_completed:${submission.brick_id}:${submission.user_id}`,
-        });
-        brickCompleted = true;
-      }
-    }
+    const applied = await applyToBrick(tx, submission, targetField, adminUserId, now);
 
     return {
-      submission: updated[0],
+      submission: applied.submission,
       idempotent: false,
       actualCash: core.actualCash,
       creditReward: core.creditReward,
       xpReward: core.xpReward,
-      brickClosed: closeRes.closed,
-      brickCompleted,
+      brickClosed: applied.brickClosed,
+      brickCompleted: applied.brickCompleted,
     };
   });
 }

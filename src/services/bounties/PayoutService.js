@@ -25,6 +25,32 @@ class PayoutError extends Error {
 }
 
 const VALID_METHODS = new Set(['PAYPAL', 'VENMO']);
+const VALID_STATUSES = new Set(['REQUESTED', 'APPROVED', 'PAID', 'REJECTED']);
+
+/**
+ * Admin payout queue (spec §18.2): payout requests across ALL users — NOT
+ * caller-scoped. Optional status + user_id filters. Ordered REQUESTED-first (the
+ * actionable ones) then created_at ASC (oldest-first), id tiebreak. Paginated by
+ * limit/offset. Mirrors BountySubmissionService.listPendingForAdmin (3.1).
+ */
+async function listForAdmin({ status, userId, limit = 50, offset = 0 } = {}, client = prisma) {
+  const params = [];
+  const where = [];
+  if (status) { params.push(status); where.push(`status = $${params.length}`); }
+  if (userId != null) { params.push(String(userId)); where.push(`user_id = $${params.length}::bigint`); }
+  params.push(limit); const limIdx = params.length;
+  params.push(offset); const offIdx = params.length;
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return (client || prisma).$queryRawUnsafe(
+    `SELECT id, user_id, amount_cents, payout_method, payout_handle, status,
+            admin_notes, reviewed_by, reviewed_at, paid_at, created_at
+       FROM payout_requests
+       ${whereSql}
+       ORDER BY CASE WHEN status = 'REQUESTED' THEN 0 ELSE 1 END, created_at ASC, id ASC
+       LIMIT $${limIdx} OFFSET $${offIdx}`,
+    ...params
+  );
+}
 
 async function lockUser(tx, userIdBig) {
   await tx.$executeRawUnsafe(
@@ -204,10 +230,46 @@ async function reject(prismaClient, { payoutRequestId, adminUserId = null, notes
   });
 }
 
+/**
+ * Read a user's full balance row for the GET /api/me/balances feed (spec §18.1).
+ * Returns the five stored money columns (available is derived by the caller via
+ * moneyMath). Returns null when the user has no balance row so the controller
+ * can choose its defensive fallback.
+ */
+async function getBalanceForUser(userId, client = prisma) {
+  const rows = await (client || prisma).$queryRawUnsafe(
+    `SELECT cash_balance_cents, reserved_cash_cents, credit_balance,
+            lifetime_cash_earned_cents, lifetime_credits_earned
+       FROM user_balances WHERE user_id = $1 LIMIT 1`,
+    BigInt(userId)
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Read one payout request by id with the full admin column set (matches
+ * listForAdmin / shapeAdminPayout). Used by the admin PATCH endpoint to shape a
+ * uniform full response — the state-machine methods' idempotent path returns only
+ * a partial row. null when not found.
+ */
+async function getById(payoutRequestId, client = prisma) {
+  const rows = await (client || prisma).$queryRawUnsafe(
+    `SELECT id, user_id, amount_cents, payout_method, payout_handle, status,
+            admin_notes, reviewed_by, reviewed_at, paid_at, created_at
+       FROM payout_requests WHERE id = $1::uuid LIMIT 1`,
+    payoutRequestId
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   request,
   approve,
   markPaid,
   reject,
+  getBalanceForUser,
+  listForAdmin,
+  getById,
+  VALID_STATUSES,
   PayoutError,
 };
