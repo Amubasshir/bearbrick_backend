@@ -1226,6 +1226,7 @@ model BountySubmission {
   userId           BigInt    @map("user_id")
   submissionType   String    @map("submission_type")
   contentUrl       String?   @map("content_url")
+  contentPath      String?   @map("content_path")
   contentText      String?   @map("content_text")
   sourceUrl        String?   @map("source_url")
   notes            String?

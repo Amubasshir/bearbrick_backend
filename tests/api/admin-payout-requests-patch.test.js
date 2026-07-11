@@ -7,8 +7,8 @@
 // mark-paid (paid_at-null guard) + advisory locks all live in the service.
 //
 // Real-behavior notes (confirmed from PayoutService, some ≠ the naive assumption):
-//   - markPaid allows REQUESTED->PAID directly (guards only paid_at/REJECTED) —
-//     locked by a characterization test below, flagged for Jake.
+//   - markPaid requires the payout be APPROVED first (Requested -> Approved -> Paid
+//     enforced per Jake item 1); a mark_paid on a REQUESTED -> 409 (cannot_pay_requested).
 //   - reject notes is OPTIONAL (admin_notes nullable) — not required, no 422.
 //   - markPaid decrements BOTH cash and reserved by amount; reject releases reserve.
 
@@ -141,11 +141,11 @@ describe('PATCH /api/admin/payout-requests/:id — transitions & accounting', ()
     expect((await payoutRow(r.payoutId)).admin_notes).toBe('bad handle');
   });
 
-  test('CHARACTERIZATION (Phase A behavior, flagged): mark_paid on a REQUESTED goes straight to PAID', async () => {
+  test('mark_paid on a REQUESTED (not yet approved) -> 409 (must be APPROVED first)', async () => {
     const r = await makeRequested('u310reqpaid', 1500);
     const res = await adminReq().patch(url(r.payoutId)).send({ action: 'mark_paid' });
-    expect(res.status).toBe(200);
-    expect(res.body.data.payoutRequest.status).toBe('PAID'); // service guards only paid_at/REJECTED
+    expect(res.status).toBe(409); // Requested -> Approved -> Paid enforced (Jake item 1)
+    expect((await payoutRow(r.payoutId)).status).toBe('REQUESTED'); // unchanged, not paid
   });
 });
 

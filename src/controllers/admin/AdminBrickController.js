@@ -3,6 +3,7 @@
  * Requires adminAuth middleware.
  */
 const prisma = require("../../lib/prisma");
+const { signBrickImageFields } = require("../../lib/brickImages");
 
 const VALID_STATUSES = ["UNRELEASED", "PROTOTYPE", "PUBLISHED"];
 
@@ -66,7 +67,9 @@ async function create(req, res) {
     },
   });
 
-  res.status(201).json({ success: true, data: brick });
+  // Sign-on-serve: any canonical bounty image field holds a durable storage path;
+  // return a fresh signed URL for it (no-op for a brand-new brick with none).
+  res.status(201).json({ success: true, data: await signBrickImageFields(brick) });
 }
 
 /**
@@ -131,7 +134,8 @@ async function update(req, res) {
   }
 
   const brick = await prisma.brick.update({ where: { id }, data });
-  res.json({ success: true, data: brick });
+  // Sign-on-serve any durable bounty image path (no-op when none are set).
+  res.json({ success: true, data: await signBrickImageFields(brick) });
 }
 
 module.exports = { create, update };

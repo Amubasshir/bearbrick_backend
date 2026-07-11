@@ -372,6 +372,21 @@ describe('PayoutService', () => {
     expect(actions.find((a) => a.action === 'PAID').idempotency_key).toBe(`payout_paid:${pr.id}`);
   });
 
+  test('markPaid requires APPROVED: a REQUESTED payout cannot be paid (Jake item 1)', async () => {
+    const userId = await createUser();
+    await seedBalance(userId, { cash: 5000 });
+    const pr = await Payout.request(prisma, {
+      userId, amountCents: 3000, payoutMethod: 'PAYPAL', payoutHandle: 'a@b.com',
+    });
+    // Requested -> Approved -> Paid is enforced: markPaid on a REQUESTED throws.
+    await expect(Payout.markPaid(prisma, { payoutRequestId: pr.id }))
+      .rejects.toMatchObject({ code: 'cannot_pay_requested' });
+    // No money moved; still REQUESTED with the reserve intact.
+    const bal = await balanceFor(userId);
+    expect(bal.cash_balance_cents).toBe(5000);
+    expect(bal.reserved_cash_cents).toBe(3000);
+  });
+
   test('reject releases the reserve, leaves cash untouched', async () => {
     const userId = await createUser();
     await seedBalance(userId, { cash: 5000 });
@@ -403,7 +418,8 @@ describe('PayoutService', () => {
       userId, amountCents: 3500, payoutMethod: 'PAYPAL', payoutHandle: 'a@b.com',
     })).rejects.toMatchObject({ code: 'insufficient_available_cash' });
 
-    // Pay the first, reject the second: cash -3000, reserved back to 0.
+    // Pay the first (approve -> mark-paid), reject the second: cash -3000, reserved back to 0.
+    await Payout.approve(prisma, { payoutRequestId: p1.id });
     await Payout.markPaid(prisma, { payoutRequestId: p1.id });
     await Payout.reject(prisma, { payoutRequestId: p2.id });
     bal = await balanceFor(userId);

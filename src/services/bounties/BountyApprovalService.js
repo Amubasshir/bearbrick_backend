@@ -30,7 +30,7 @@ class ApprovalError extends Error {
 
 const SUBMISSION_SELECT = `
   bs.id, bs.user_id, bs.brick_id, bs.bounty_instance_id, bs.status,
-  bs.submission_type, bs.content_url, bs.content_text,
+  bs.submission_type, bs.content_url, bs.content_path, bs.content_text,
   bs.cash_reward_cents, bs.credit_reward, bs.xp_reward, u.timezone`;
 
 /** Load the submission joined to its user (for timezone / local_day_key). */

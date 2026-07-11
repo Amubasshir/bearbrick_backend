@@ -57,9 +57,14 @@ async function resolveTargetField(tx, bountyInstanceId) {
  * Returns { submission, brickClosed, brickCompleted }.
  */
 async function applyToBrick(tx, submission, targetField, adminUserId, now) {
+  // IMAGE bounties write the DURABLE object path (content_path) into the canonical
+  // brick column so the stored reference never expires (Goodwill Item 2); the read
+  // layer re-signs it on serve (lib/brickImages). Falls back to content_url for
+  // submissions captured before the path was persisted. DATA bounties write text.
   // release_year is the one INTEGER column.
   let value = submission.submission_type === 'IMAGE'
-    ? submission.content_url : submission.content_text;
+    ? (submission.content_path || submission.content_url)
+    : submission.content_text;
   if (targetField === 'release_year') value = parseInt(value, 10);
   await tx.$executeRawUnsafe(
     `UPDATE bricks SET "${targetField}" = $1, updated_at = NOW() WHERE id = $2`,

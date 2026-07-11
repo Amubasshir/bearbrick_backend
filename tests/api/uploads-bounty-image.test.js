@@ -87,6 +87,14 @@ describe('POST /api/uploads/bounty-image', () => {
     expect(res.body.data.contentUrl).toMatch(
       new RegExp(`^https://signed\\.example/${verified.userId}/.*\\.png$`)
     );
+    // Goodwill Item 2: the durable object PATH is also returned so the submission
+    // can capture it. It is the bare bucket key (what the object was stored under),
+    // NOT a signed URL.
+    expect(res.body.data.contentPath).toBe(storage.calls.upload[0].path);
+    expect(res.body.data.contentPath).toMatch(
+      new RegExp(`^${verified.userId}/.*\\.png$`)
+    );
+    expect(res.body.data.contentPath).not.toMatch(/^https?:|token=/);
     expect(storage.upload).toHaveBeenCalledTimes(1);
     expect(storage.calls.upload[0].opts.contentType).toBe('image/png');
   });

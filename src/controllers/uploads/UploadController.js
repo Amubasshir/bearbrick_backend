@@ -50,7 +50,13 @@ async function bountyImage(req, res) {
       userId: req.user.id,
     });
 
-    return res.status(200).json({ success: true, data: { contentUrl: result.signedUrl } });
+    // contentUrl is the (1-hour) signed URL for immediate preview; contentPath is
+    // the DURABLE object key the submission captures so Approve+Apply can store a
+    // permanent reference in the canonical brick field (Goodwill Item 2).
+    return res.status(200).json({
+      success: true,
+      data: { contentUrl: result.signedUrl, contentPath: result.path },
+    });
   } catch (err) {
     if (err instanceof ImageUploadService.ImageUploadError) {
       if (err.code === 'image_validation_failed') {

@@ -6,8 +6,9 @@
 //   node scripts/smoke-bounty-upload.js
 //
 // Stages: setup -> real upload -> object-exists-in-bucket -> signed-URL-resolves
-//   -> submit -> admin approve-and-apply (reward moves + canonical write + close).
-// Reuses the shipped services/helpers; adds no business logic.
+//   -> submit (captures durable path) -> admin approve-and-apply (reward moves +
+//   DURABLE path written + close) -> sign-on-serve (fresh signed URL from the
+//   stored path resolves 200). Reuses the shipped services/helpers; no new logic.
 
 require('dotenv').config();
 
@@ -86,13 +87,15 @@ async function main() {
     if (status === 200) pass('signed URL resolves (HTTP 200)');
     else fail('signed URL resolves', 'status=' + status);
 
-    // 4. Submit referencing the signed URL.
+    // 4. Submit capturing the DURABLE object path (Goodwill Item 2) alongside the
+    //    signed URL (the latter is for immediate preview only).
     const submission = await Sub.submit(prisma, {
-      userId: submitterId, bountyInstanceId: instanceId, submissionType: 'IMAGE', contentUrl: uploaded.signedUrl,
+      userId: submitterId, bountyInstanceId: instanceId, submissionType: 'IMAGE',
+      contentUrl: uploaded.signedUrl, contentPath: uploaded.path,
     });
     if (submission.status !== 'PENDING') throw new Error('expected PENDING, got ' + submission.status);
     if (submission.cash_reward_cents !== 75) throw new Error('expected captured 75c, got ' + submission.cash_reward_cents);
-    pass('submit → PENDING (reward captured)', `sub=${submission.id} cash=${submission.cash_reward_cents}c`);
+    pass('submit → PENDING (reward + durable path captured)', `sub=${submission.id} cash=${submission.cash_reward_cents}c`);
 
     // 5. Admin approve-and-apply → reward moves + canonical write + close.
     const result = await ApplyService.approveAndApply(prisma, { submissionId: submission.id, adminUserId: null });
@@ -106,10 +109,23 @@ async function main() {
     if (!bal || bal.cash_balance_cents !== 75 || bal.credit_balance !== 75) throw new Error('balance did not move: ' + JSON.stringify(bal));
     if (!xps.includes('BOUNTY_SUBMISSION_APPROVED')) throw new Error('missing BOUNTY_SUBMISSION_APPROVED xp');
     if (rewards.length < 1) throw new Error('no reward event minted');
-    if (brickRow[0].packaging_back_image_url !== uploaded.signedUrl) throw new Error('canonical brick field not written');
+    // Goodwill Item 2: the canonical field now holds the DURABLE path, not the signed URL.
+    const storedRef = brickRow[0].packaging_back_image_url;
+    if (storedRef !== uploaded.path) throw new Error(`canonical field is not the durable path: ${storedRef}`);
+    if (/^https?:|token=/.test(storedRef)) throw new Error('canonical field looks like a signed URL: ' + storedRef);
     if (instRow[0].status !== 'CLOSED') throw new Error('instance not closed, got ' + instRow[0].status);
-    pass('approve-and-apply → reward moved + canonical write + close',
-      `cash=${bal.cash_balance_cents}c credits=${bal.credit_balance} xp=[${xps.join(',')}]`);
+    pass('approve-and-apply → reward moved + DURABLE path written + close',
+      `field=${storedRef} cash=${bal.cash_balance_cents}c xp=[${xps.join(',')}]`);
+
+    // 6. Sign-on-serve: re-sign the STORED durable path into a fresh URL and prove
+    //    it resolves — the app can always produce a working link from the canonical
+    //    reference, even though the original upload URL has expired.
+    const resigned = await storage.createSignedUrl(storedRef, 3600);
+    const freshUrl = resigned && resigned.data && resigned.data.signedUrl;
+    if (!freshUrl) throw new Error('could not re-sign stored path: ' + JSON.stringify(resigned && resigned.error));
+    const serveStatus = await httpsStatus(freshUrl);
+    if (serveStatus !== 200) throw new Error('re-signed URL did not resolve, status=' + serveStatus);
+    pass('sign-on-serve: fresh signed URL from stored path resolves (HTTP 200)');
 
     console.log('\nSMOKE RESULT: PASS — every stage green against live Supabase.');
   } catch (err) {

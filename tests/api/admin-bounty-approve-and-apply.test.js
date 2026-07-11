@@ -127,6 +127,38 @@ describe('POST /admin/bounty-submissions/:id/approve-and-apply — behavior', ()
     expect(await rewardEventsFor(p.submitterId)).toHaveLength(1);
   });
 
+  test('IMAGE apply writes the DURABLE object path (content_path), not the expiring signed URL', async () => {
+    const submitterId = await createUser({ verified: true, tag: 'u33durable' });
+    const brickId = await createBrick({
+      tag: 'u33durable',
+      fields: {
+        packaging_front_image_url: 'a', back_image_url: 'c', side_image_url: 'd',
+        bottom_stamp_image_url: 'e', release_year: 2020, release_method: 'lottery', notes: 'n',
+      },
+    });
+    const brick = await Inst.getBrickForGeneration(prisma, brickId);
+    await Inst.generateForBrick(prisma, brick);
+    const instanceId = await instanceIdByType(brickId, 'PACKAGING_BACK');
+    const PATH = `${submitterId}/durable-apply-uuid.png`;
+    const sub = await Sub.submit(prisma, {
+      userId: submitterId, bountyInstanceId: instanceId,
+      submissionType: 'IMAGE', contentUrl: IMG, contentPath: PATH,
+    });
+
+    const res = await adminReq().post(url(sub.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.submission.status).toBe('APPLIED_TO_BRICK');
+
+    // Canonical field holds the DURABLE path, not the expiring signed URL.
+    const stored = await brickField(brickId, 'packaging_back_image_url');
+    expect(stored).toBe(PATH);
+    expect(stored).not.toMatch(/^https?:|token=/);
+    // Rest of apply unchanged: instance CLOSED + BRICK_COMPLETED (last bounty).
+    expect(await instanceStatus(instanceId)).toBe('CLOSED');
+    const xps = (await xpEventsFor(submitterId)).map((x) => x.event_type);
+    expect(xps).toContain('BRICK_COMPLETED');
+  });
+
   test('already-APPROVED -> apply-only: field written + CLOSED + NO second reward', async () => {
     const p = await makePending('u33applyonly');
     // Reach APPROVED via plain approve (rewards once, instance stays OPEN).

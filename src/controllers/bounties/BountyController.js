@@ -181,12 +181,13 @@ function submissionErrorResponse(code) {
  */
 async function createSubmission(req, res) {
   try {
-    const { submissionType, contentUrl, contentText, sourceUrl, notes } = req.body || {};
+    const { submissionType, contentUrl, contentPath, contentText, sourceUrl, notes } = req.body || {};
     const created = await BountySubmissionService.submit(prisma, {
       userId: req.user.id,
       bountyInstanceId: req.params.bountyInstanceId,
       submissionType,
       contentUrl,
+      contentPath,
       contentText,
       sourceUrl,
       notes,

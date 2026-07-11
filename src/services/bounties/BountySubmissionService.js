@@ -46,6 +46,7 @@ async function submit(prismaClient, input) {
     bountyInstanceId,
     submissionType,
     contentUrl = null,
+    contentPath = null,
     contentText = null,
     sourceUrl = null,
     notes = null,
@@ -131,15 +132,15 @@ async function submit(prismaClient, input) {
     const subRows = await tx.$queryRawUnsafe(
       `INSERT INTO bounty_submissions
          (bounty_instance_id, brick_id, user_id, submission_type,
-          content_url, content_text, source_url, notes,
+          content_url, content_path, content_text, source_url, notes,
           status, rejection_reasons, cash_reward_cents, credit_reward, xp_reward,
           reviewed_at)
-       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-               CASE WHEN $9 = 'REJECTED' THEN NOW() ELSE NULL END)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               CASE WHEN $10 = 'REJECTED' THEN NOW() ELSE NULL END)
        RETURNING id, status, cash_reward_cents, credit_reward, xp_reward,
                  bounty_instance_id, brick_id, user_id`,
       inst.id, inst.brick_id, userIdBig, submissionType,
-      contentUrl, contentText, sourceUrl, notes,
+      contentUrl, contentPath, contentText, sourceUrl, notes,
       status, rejectionReasons, cashReward, creditReward, xpReward
     );
     const submission = subRows[0];

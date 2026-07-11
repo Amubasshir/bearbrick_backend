@@ -168,7 +168,11 @@ async function markPaid(prismaClient, { payoutRequestId, adminUserId = null }) {
     if (pr.paid_at != null || pr.status === 'PAID') {
       return { payout: pr, idempotent: true }; // double-click no-op
     }
-    if (pr.status === 'REJECTED') throw new PayoutError('cannot_pay_rejected');
+    // Requested -> Approved -> Paid is enforced (Jake item 1): a payout must be
+    // APPROVED before it can be paid. REQUESTED -> cannot_pay_requested,
+    // REJECTED -> cannot_pay_rejected (both 409). The already-PAID no-op above is
+    // untouched, so a double mark-paid stays idempotent.
+    if (pr.status !== 'APPROVED') throw new PayoutError('cannot_pay_' + pr.status.toLowerCase());
 
     const idemKey = `payout_paid:${payoutRequestId}`;
     const upd = await tx.$queryRawUnsafe(

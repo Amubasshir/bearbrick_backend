@@ -112,6 +112,20 @@ describe('POST /api/bounties/:bountyInstanceId/submissions', () => {
     });
   });
 
+  test('IMAGE submission captures the durable content_path (bare object key, not a signed URL)', async () => {
+    const PATH = `${verified.userId}/durable-object-uuid.png`;
+    const res = await postSubmission(verified.token, imgInst, {
+      submissionType: 'IMAGE', contentUrl: IMG_URL, contentPath: PATH,
+    });
+    expect(res.status).toBe(201);
+    const row = await prisma.$queryRawUnsafe(
+      `SELECT content_path FROM bounty_submissions WHERE id = $1::uuid`,
+      res.body.data.submission.id
+    );
+    expect(row[0].content_path).toBe(PATH);                 // durable key persisted
+    expect(row[0].content_path).not.toMatch(/^https?:|token=/); // not the signed URL
+  });
+
   test('201 for a valid DATA submission', async () => {
     const res = await postSubmission(verified.token, dataInst, {
       submissionType: 'DATA', contentText: '2023', sourceUrl: 'https://ref.example',
